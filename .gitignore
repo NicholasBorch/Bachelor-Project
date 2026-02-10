@@ -1,1 +1,8 @@
 Data/HAM10000/
+Data/WMH_data/
+
+__pycache__/
+*.pyc
+
+.DS_Store
+Thumbs.db
