@@ -28,7 +28,7 @@ SCORE_TYPE = "p_true"
 # Teacher model for uncertainty ranking
 ARCH = "resnet18"
 PRETRAINED = True
-TEACHER_EPOCHS = 3  # Set to 3 normally, but 1 for quick testing.
+TEACHER_EPOCHS = 1  # Set to 3 normally, but 1 for quick testing.
 
 # Training hyperparams for teacher
 BATCH_SIZE = 16  # Set to 64 normally, but 16 for quick testing.
