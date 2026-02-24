@@ -15,23 +15,23 @@ from src.classification.noise_idn import (
 SEED = 42
 
 # Outer evaluation CV
-OUTER_FOLDS = 2  # set to 5 normally, but 2 for quick testing.
+OUTER_FOLDS = 5  # set to 5 normally, but 2 for quick testing.
 
 # Inner CV 
-INNER_FOLDS = 2  # set to 5 normally, but 2 for quick testing.
+INNER_FOLDS = 5  # set to 5 normally, but 2 for quick testing.
 
 # Noise settings (IDN)
-NOISE_RATES = [0.10, 0.20]  # Multiple global noise levels.
-ETA_MAX = 0.30 # No more than 30% of a given class is flipped.
+NOISE_RATES = [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35]  # Multiple global noise levels.
+ETA_MAX = 0.40 # No more than 40% of a given class is flipped.
 SCORE_TYPE = "p_true"
 
 # Teacher model for uncertainty ranking
 ARCH = "resnet18"
 PRETRAINED = True
-TEACHER_EPOCHS = 1  # Set to 3 normally, but 1 for quick testing.
+TEACHER_EPOCHS = 5  # Set to 5 normally, but 1 for quick testing.
 
 # Training hyperparams for teacher
-BATCH_SIZE = 16  # Set to 64 normally, but 16 for quick testing.
+BATCH_SIZE = 64  # Set to 64 normally, but 16 for quick testing.
 LR = 3e-4
 WEIGHT_DECAY = 1e-4
 
