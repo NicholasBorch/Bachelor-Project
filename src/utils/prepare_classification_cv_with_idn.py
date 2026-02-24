@@ -21,7 +21,7 @@ OUTER_FOLDS = 2  # set to 5 normally, but 2 for quick testing.
 INNER_FOLDS = 2  # set to 5 normally, but 2 for quick testing.
 
 # Noise settings (IDN)
-NOISE_RATES = [0.10, 0.20, 0.30, 0.40]  # Multiple global noise levels.
+NOISE_RATES = [0.10, 0.20]  # Multiple global noise levels.
 ETA_MAX = 0.30 # No more than 30% of a given class is flipped.
 SCORE_TYPE = "p_true"
 
