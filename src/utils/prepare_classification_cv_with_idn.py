@@ -15,10 +15,10 @@ from src.classification.noise_idn import (
 SEED = 42
 
 # Outer evaluation CV
-OUTER_FOLDS = 5  # set to 5 normally, but 2 for quick testing.
+OUTER_FOLDS = 2  # set to 5 normally, but 2 for quick testing.
 
 # Inner CV 
-INNER_FOLDS = 5  # set to 5 normally, but 2 for quick testing.
+INNER_FOLDS = 2  # set to 5 normally, but 2 for quick testing.
 
 # Noise settings (IDN)
 NOISE_RATES = [0.10, 0.20, 0.30, 0.40]  # Multiple global noise levels.
@@ -31,7 +31,7 @@ PRETRAINED = True
 TEACHER_EPOCHS = 3  # Set to 3 normally, but 1 for quick testing.
 
 # Training hyperparams for teacher
-BATCH_SIZE = 64  # Set to 64 normally, but 16 for quick testing.
+BATCH_SIZE = 16  # Set to 64 normally, but 16 for quick testing.
 LR = 3e-4
 WEIGHT_DECAY = 1e-4
 
