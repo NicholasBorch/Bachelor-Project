@@ -1,51 +1,85 @@
+# src/classification/noise_idn.py
+"""
+Instance-Dependent Noise (IDN) label corruption — Synthetic generator (Algorithm 2).
+
+This module implements the *standard* synthetic IDN generation procedure used in
+the noisy-label learning literature, matching Algorithm 2 from the referenced paper
+and the widely-circulated reference implementation pattern:
+
+  - Sample per-instance flip rate q_i ~ TruncatedNormal(tau, sigma^2) clipped to [0, 1]
+  - Sample class-conditional random matrices W_y ~ N(0, I)
+  - For each sample (x_i, y_i):
+        a = x_i^T W_{y_i}
+        set a[y_i] = -inf
+        p = q_i * softmax(a)
+        p[y_i] += 1 - q_i
+        y_tilde ~ Categorical(p)
+
+Why this exists in our repo:
+  - We generate *controlled*, reproducible IDN-corrupted training folds for HAM10000
+    to evaluate noise-robust training methods in our bachelor project.
+
+Industry-style provenance / attribution:
+  - The algorithmic steps correspond to Algorithm 2 in the project’s referenced IDN paper.
+  - This implementation is a batched, device-agnostic adaptation of the common reference
+    code pattern (including the snippet we discussed) so it runs on CPU-only machines
+    (e.g., Intel Mac) as well as CUDA GPUs (Windows, DTU HPC).
+
+Notes:
+  - This is a *data corruption* utility. It does not train models and does not require
+    teacher predictions (unlike our previous OOF/teacher-driven pipeline).
+
+Author: Bachelor Project team
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import inf
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
 from PIL import Image
-
-import torch
-import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
-from torchvision import models, transforms
-
-from sklearn.model_selection import StratifiedKFold
+from scipy import stats
 from tqdm import tqdm
 
-from src.common.seed import seed_everything
+import torch
+import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
 
 
+# ----------------------------
 # Data structures
+# ----------------------------
 @dataclass
 class NoiseReport:
     """
     Summary of noise injection for one outer fold.
-    flip_confusion maps: true_label -> {noisy_label: count}
+
+    flip_confusion maps:
+        true_label_str -> {noisy_label_str: count}
     """
     outer_fold: int
     seed: int
-    arch: str
-    score_type: str
-    noise_rate: float
+    tau: float
+    norm_std: float
+    num_classes: int
+    feature_size: int
     n_train: int
     n_flipped: int
     class_counts_clean: Dict[str, int]
     class_counts_noisy: Dict[str, int]
     flip_confusion: Dict[str, Dict[str, int]]
-    flipped_uncertainty_min: float
-    flipped_uncertainty_median: float
-    flipped_uncertainty_max: float
+    flip_rate_min: float
+    flip_rate_median: float
+    flip_rate_max: float
 
 
 @dataclass
 class FoldOutputs:
-    """
-    Output bundle for one outer fold.
-    """
     train_clean: pd.DataFrame
     train_noisy: pd.DataFrame
     test_clean: pd.DataFrame
@@ -54,34 +88,13 @@ class FoldOutputs:
 
 @dataclass
 class IDNOutputs:
-    """
-    Output bundle for all folds.
-    """
     fold_assignments: pd.DataFrame
     folds: Dict[int, FoldOutputs]
 
 
-@dataclass
-class OOFFoldOutputs:
-    """
-    Output bundle for one outer fold (OOF stage).
-    """
-    train_df: pd.DataFrame
-    test_df: pd.DataFrame
-    oof_scores: Dict[str, float]
-    oof_probs: Dict[str, np.ndarray]
-
-
-@dataclass
-class OOFOutputs:
-    """
-    Output bundle for all folds (OOF stage).
-    """
-    fold_assignments: pd.DataFrame
-    folds: Dict[int, OOFFoldOutputs]
-
-
+# ----------------------------
 # Helpers
+# ----------------------------
 def class_mapping(classes: List[str]) -> Tuple[Dict[str, int], Dict[int, str]]:
     """Stable mapping between string labels and integer indices."""
     classes_sorted = sorted(list(set(classes)))
@@ -90,22 +103,19 @@ def class_mapping(classes: List[str]) -> Tuple[Dict[str, int], Dict[int, str]]:
     return c2i, i2c
 
 
+# ----------------------------
 # Dataset
-class HamDataset(Dataset):
+# ----------------------------
+class HamTensorDataset(Dataset):
     """
-    Torch dataset returning (image_tensor, label_idx, image_id_str).
+    Minimal dataset for IDN generation.
+    Returns (x_tensor, y_index, image_id_str).
     """
-    def __init__(
-        self,
-        df: pd.DataFrame,
-        images_dir: Path,
-        c2i: Dict[str, int],
-        transform: transforms.Compose,
-    ):
+    def __init__(self, df: pd.DataFrame, images_dir: Path, c2i: Dict[str, int], tfm):
         self.df = df.reset_index(drop=True)
         self.images_dir = images_dir
         self.c2i = c2i
-        self.transform = transform
+        self.tfm = tfm
 
     def __len__(self) -> int:
         return len(self.df)
@@ -113,134 +123,223 @@ class HamDataset(Dataset):
     def __getitem__(self, idx: int):
         row = self.df.iloc[idx]
         image_id = str(row["image_id"])
-        label_str = str(row["dx"])
-        y = self.c2i[label_str]
+        y_str = str(row["dx"])
+        y = int(self.c2i[y_str])
 
         img_path = self.images_dir / f"{image_id}.jpg"
         img = Image.open(img_path).convert("RGB")
-        img = self.transform(img)
+        x = self.tfm(img)
 
-        return img, y, image_id
-
-
-# Model building
-def build_resnet(arch: str, num_classes: int, pretrained: bool) -> nn.Module:
-    """
-    Build ResNet teacher with classification head.
-    """
-    arch = arch.lower().strip()
-
-    if arch == "resnet18":
-        m = models.resnet18(weights=models.ResNet18_Weights.DEFAULT if pretrained else None)
-    elif arch == "resnet34":
-        m = models.resnet34(weights=models.ResNet34_Weights.DEFAULT if pretrained else None)
-    elif arch == "resnet50":
-        m = models.resnet50(weights=models.ResNet50_Weights.DEFAULT if pretrained else None)
-    elif arch == "resnet101":
-        m = models.resnet101(weights=models.ResNet101_Weights.DEFAULT if pretrained else None)
-    else:
-        m = models.resnet18(weights=models.ResNet18_Weights.DEFAULT if pretrained else None)
-
-    m.fc = nn.Linear(m.fc.in_features, num_classes)
-    return m
+        return x, y, image_id
 
 
-# Training + OOF scoring
-def train_teacher(
-    model: nn.Module,
-    train_loader: DataLoader,
-    device: str,
-    epochs: int,
-    lr: float,
-    weight_decay: float,
-    use_amp: bool,
-    desc: str,
-) -> None:
-    """
-    Lightweight teacher training (few epochs) since nested CV trains many teachers.
-    """
-    model.to(device)
-    model.train()
-
-    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    criterion = nn.CrossEntropyLoss()
-
-    scaler = torch.cuda.amp.GradScaler(enabled=(use_amp and device.startswith("cuda")))
-
-    for ep in range(1, epochs + 1):
-        running_loss = 0.0
-        n = 0
-
-        pbar = tqdm(train_loader, desc=f"{desc} | ep {ep}/{epochs}", leave=False)
-        for x, y, _ in pbar:
-            x = x.to(device, non_blocking=True)
-            y = y.to(device, non_blocking=True)
-
-            opt.zero_grad(set_to_none=True)
-
-            with torch.cuda.amp.autocast(enabled=(use_amp and device.startswith("cuda"))):
-                logits = model(x)
-                loss = criterion(logits, y)
-
-            scaler.scale(loss).backward()
-            scaler.step(opt)
-            scaler.update()
-
-            running_loss += float(loss.item()) * x.size(0)
-            n += x.size(0)
-            pbar.set_postfix(loss=(running_loss / max(n, 1)))
-
-    model.eval()
-
-
+# ----------------------------
+# Core IDN generator (Algorithm 2)
+# ----------------------------
 @torch.no_grad()
-def score_uncertainty_and_probs(
-    model: nn.Module,
-    loader: DataLoader,
-    device: str,
-    score_type: str,
-) -> Tuple[Dict[str, float], Dict[str, np.ndarray]]:
+def generate_instance_dependent_noisy_labels(
+    df: pd.DataFrame,
+    images_dir: Path,
+    tau: float,
+    seed: int,
+    *,
+    image_size: int = 224,
+    norm_std: float = 0.1,
+    batch_size: int = 64,
+    num_workers: int = 0,
+    pin_memory: bool = False,
+) -> Tuple[pd.DataFrame, NoiseReport]:
     """
-    For each sample:
-      - uncertainty score (higher = more uncertain)
-      - full softmax probability vector (used for probabilistic flip sampling)
-    """
-    model.eval()
-    scores: Dict[str, float] = {}
-    probs_dict: Dict[str, np.ndarray] = {}
+    Apply *standard synthetic IDN* corruption to a dataframe split.
 
-    for x, y, image_ids in loader:
+    Parameters
+    ----------
+    df:
+        DataFrame containing columns: ["image_id", "lesion_id", "dx"].
+        dx is the *clean* label string.
+    images_dir:
+        Directory holding images named "<image_id>.jpg".
+    tau:
+        Mean corruption rate (paper uses τ). This is the *expected* flip probability.
+    seed:
+        RNG seed for reproducibility.
+    image_size:
+        Images are resized to (image_size, image_size) before flattening.
+    norm_std:
+        Std dev for truncated normal sampling of per-instance flip rates.
+        (Paper default is typically 0.1).
+    batch_size, num_workers, pin_memory:
+        DataLoader settings.
+
+    Returns
+    -------
+    df_out:
+        Original rows plus ["dx_clean", "dx_noisy"].
+    report:
+        NoiseReport with confusion summary and flip statistics.
+
+    Implementation notes:
+      - Uses transforms.Resize + ToTensor (no ImageNet normalization) to keep "pixel-vector"
+        semantics close to the original synthetic IDN generator setting.
+      - Batched computation:
+            logits = x_flat @ W_y
+        where W_y is selected per-sample by its clean label y.
+    """
+    df = df.copy().reset_index(drop=True)
+    df["image_id"] = df["image_id"].astype(str)
+    df["lesion_id"] = df["lesion_id"].astype(str)
+    df["dx"] = df["dx"].astype(str)
+
+    c2i, i2c = class_mapping(df["dx"].tolist())
+    num_classes = len(c2i)
+
+    # Device selection: CPU on Intel Mac, CUDA on Windows/HPC if available.
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # Transforms: keep close to "raw feature vector" setting.
+    tfm = transforms.Compose([
+        transforms.Resize((image_size, image_size)),
+        transforms.ToTensor(),  # [0,1]
+    ])
+
+    ds = HamTensorDataset(df=df, images_dir=images_dir, c2i=c2i, tfm=tfm)
+    dl = DataLoader(
+        ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=(pin_memory and device.startswith("cuda")),
+    )
+
+    # Feature size d = 3 * H * W
+    feature_size = 3 * image_size * image_size
+
+    # ----------------------------
+    # Reproducible RNG
+    # ----------------------------
+    np.random.seed(int(seed))
+    torch.manual_seed(int(seed))
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(int(seed))
+        torch.cuda.manual_seed_all(int(seed))
+
+    # ----------------------------
+    # Sample per-instance flip rates q_i ~ TruncNorm(tau, norm_std^2, [0,1])
+    # ----------------------------
+    n = len(df)
+    flip_dist = stats.truncnorm(
+        (0.0 - tau) / norm_std,
+        (1.0 - tau) / norm_std,
+        loc=tau,
+        scale=norm_std,
+    )
+    flip_rates = flip_dist.rvs(n).astype(np.float32)
+
+    # ----------------------------
+    # Sample class-conditional random matrices W_y ~ N(0, I)
+    # Shape: (C, d, C)
+    # ----------------------------
+    W = np.random.randn(num_classes, feature_size, num_classes).astype(np.float32)
+    W = torch.from_numpy(W).to(device)
+
+    # Output arrays
+    new_label_idx = np.empty(n, dtype=np.int64)
+
+    # Confusion bookkeeping on string labels
+    flip_confusion: Dict[str, Dict[str, int]] = {}
+
+    # Iterate in order, so we can align flip_rates with dataset indices
+    cursor = 0
+    pbar = tqdm(dl, desc="IDN corruption (Algorithm 2)", leave=True)
+
+    for x, y, _image_ids in pbar:
+        b = x.size(0)
         x = x.to(device, non_blocking=True)
-        y = y.to(device, non_blocking=True)
+        y = y.to(device, non_blocking=True).long()
 
-        logits = model(x)
-        probs = torch.softmax(logits, dim=1)
+        # Flatten to (B, d)
+        x_flat = x.view(b, -1)
 
-        if score_type == "p_true":
-            p_true = probs.gather(1, y.view(-1, 1)).squeeze(1)
-            uncertainty = 1.0 - p_true
-        elif score_type == "max_softmax":
-            p_max, _ = probs.max(dim=1)
-            uncertainty = 1.0 - p_max
-        else:  # "entropy"
-            eps = 1e-8
-            uncertainty = -(probs * (probs + eps).log()).sum(dim=1)
+        # Select W_y per sample: (B, d, C)
+        W_y = W[y]
 
-        probs_np = probs.detach().cpu().numpy().astype(np.float32)
-        unc_np = uncertainty.detach().cpu().numpy().astype(np.float32)
+        # logits: (B, C) via batched matrix multiply
+        # (B,1,d) @ (B,d,C) -> (B,1,C) -> (B,C)
+        logits = torch.bmm(x_flat.unsqueeze(1), W_y).squeeze(1)
 
-        for img_id, u, p in zip(image_ids, unc_np, probs_np):
-            scores[str(img_id)] = float(u)
-            probs_dict[str(img_id)] = p
+        # Set true-class logit to -inf so softmax mass is only on wrong classes
+        logits[torch.arange(b, device=device), y] = -inf
 
-    return scores, probs_dict
+        # softmax over wrong classes
+        off_diag = F.softmax(logits, dim=1)
+
+        # Apply per-instance flip rates
+        q = torch.from_numpy(flip_rates[cursor:cursor + b]).to(device).view(-1, 1)  # (B,1)
+        P = q * off_diag
+        P[torch.arange(b, device=device), y] += (1.0 - q.squeeze(1))
+
+        # Sample new labels from categorical distribution P
+        sampled = torch.multinomial(P, num_samples=1).squeeze(1)  # (B,)
+        sampled_cpu = sampled.detach().cpu().numpy().astype(np.int64)
+        y_cpu = y.detach().cpu().numpy().astype(np.int64)
+
+        new_label_idx[cursor:cursor + b] = sampled_cpu
+
+        # Update confusion counts
+        for yi, ytilde in zip(y_cpu, sampled_cpu):
+            if ytilde == yi:
+                continue
+            true_str = i2c[int(yi)]
+            noisy_str = i2c[int(ytilde)]
+            flip_confusion.setdefault(true_str, {})
+            flip_confusion[true_str][noisy_str] = flip_confusion[true_str].get(noisy_str, 0) + 1
+
+        cursor += b
+
+    # Build output dataframe
+    df_out = df.copy()
+    df_out["dx_clean"] = df_out["dx"]
+    df_out["dx_noisy"] = [i2c[int(i)] for i in new_label_idx]
+
+    n_flipped = int((df_out["dx_clean"] != df_out["dx_noisy"]).sum())
+
+    # Flip-rate summary
+    fr_min = float(np.min(flip_rates)) if len(flip_rates) else float("nan")
+    fr_med = float(np.median(flip_rates)) if len(flip_rates) else float("nan")
+    fr_max = float(np.max(flip_rates)) if len(flip_rates) else float("nan")
+
+    report = NoiseReport(
+        outer_fold=-1,  # filled by caller if used per fold
+        seed=int(seed),
+        tau=float(tau),
+        norm_std=float(norm_std),
+        num_classes=int(num_classes),
+        feature_size=int(feature_size),
+        n_train=int(n),
+        n_flipped=int(n_flipped),
+        class_counts_clean=df_out["dx_clean"].value_counts().to_dict(),
+        class_counts_noisy=df_out["dx_noisy"].value_counts().to_dict(),
+        flip_confusion=flip_confusion,
+        flip_rate_min=fr_min,
+        flip_rate_median=fr_med,
+        flip_rate_max=fr_max,
+    )
+
+    return df_out, report
 
 
-# Fold creation (lesion-level stratified)
+# ----------------------------
+# Outer-fold pipeline helpers
+# ----------------------------
 def make_outer_folds_lesion_stratified(df: pd.DataFrame, n_splits: int, seed: int) -> pd.DataFrame:
     """
-    Outer folds are created on unique lesion_id with stratification on dx.
+    Create outer folds on unique lesion_id with stratification on dx.
+
+    This matches our evaluation protocol: the test fold remains clean; only the
+    outer-train split is corrupted.
     """
+    from sklearn.model_selection import StratifiedKFold
+
     df = df.copy().sort_values(["lesion_id", "image_id"]).reset_index(drop=True)
 
     lesion_df = df.drop_duplicates(subset=["lesion_id"]).copy()
@@ -260,377 +359,74 @@ def make_outer_folds_lesion_stratified(df: pd.DataFrame, n_splits: int, seed: in
     return df
 
 
-def make_inner_folds_lesion_stratified(train_df: pd.DataFrame, n_splits: int, seed: int) -> pd.DataFrame:
-    """
-    Inner folds are created on unique lesion_id within the outer-train split.
-    """
-    train_df = train_df.copy().sort_values(["lesion_id", "image_id"]).reset_index(drop=True)
-
-    lesion_df = train_df.drop_duplicates(subset=["lesion_id"]).copy()
-    lesion_df = lesion_df.sort_values(["lesion_id"]).reset_index(drop=True)
-
-    y = lesion_df["dx"].values
-    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
-
-    lesion_fold = np.full(len(lesion_df), -1, dtype=int)
-    for fold_id, (_, val_idx) in enumerate(skf.split(np.arange(len(lesion_df)), y)):
-        lesion_fold[val_idx] = fold_id
-
-    lesion_df["inner_fold"] = lesion_fold
-    lesion_to_fold = dict(zip(lesion_df["lesion_id"].astype(str), lesion_df["inner_fold"].astype(int)))
-    train_df["inner_fold"] = train_df["lesion_id"].astype(str).map(lesion_to_fold)
-
-    return train_df
-
-
-# Noise injection
-def inject_noise_idn_with_caps(
-    train_df: pd.DataFrame,
-    oof_scores: Dict[str, float],
-    oof_probs: Dict[str, np.ndarray],
-    c2i: Dict[str, int],
-    i2c: Dict[int, str],
-    noise_rate: float,
-    eta_max: float,
-    rng: np.random.Generator,
-) -> Tuple[pd.DataFrame, Dict[str, Dict[str, int]]]:
-    """
-    Instance-dependent noise injection (IDN):
-      1) Rank by OOF uncertainty (difficulty)
-      2) Select top r*N to flip, with per-class flip caps (eta_max * N_c)
-      3) For each selected sample, flip label by sampling from teacher probabilities
-         after removing the true class and renormalizing.
-
-    Returns:
-      df_out: original rows + dx_clean, dx_noisy, uncertainty
-      flip_confusion: true_label -> {noisy_label: count}
-    """
-    df = train_df.copy().reset_index(drop=True)
-    df["dx_clean"] = df["dx"]
-    df["dx_noisy"] = df["dx"]
-    df["uncertainty"] = df["image_id"].astype(str).map(oof_scores)
-
-    n = len(df)
-    n_flip_target = int(round(noise_rate * n))
-
-    class_counts = df["dx_clean"].value_counts().to_dict()
-    class_cap = {cls: int(np.floor(eta_max * cnt)) for cls, cnt in class_counts.items()}
-    flipped_per_class = {cls: 0 for cls in class_counts.keys()}
-
-    df_sorted = df.sort_values("uncertainty", ascending=False).reset_index(drop=True)
-
-    selected_idx: List[int] = []
-    for idx in df_sorted.index:
-        if len(selected_idx) >= n_flip_target:
-            break
-
-        true_label = str(df_sorted.loc[idx, "dx_clean"])
-        if flipped_per_class[true_label] >= class_cap[true_label]:
-            continue
-
-        selected_idx.append(int(idx))
-        flipped_per_class[true_label] += 1
-
-    flip_conf: Dict[str, Dict[str, int]] = {}
-
-    for idx in selected_idx:
-        img_id = str(df_sorted.loc[idx, "image_id"])
-        true_label = str(df_sorted.loc[idx, "dx_clean"])
-        true_idx = c2i[true_label]
-
-        p = oof_probs[img_id].astype(np.float64, copy=True)
-        p[true_idx] = 0.0
-        s = float(p.sum())
-
-        if s <= 0.0:
-            continue
-
-        p = p / s
-        new_idx = int(rng.choice(np.arange(len(p)), p=p))
-        new_label = i2c[new_idx]
-
-        df_sorted.loc[idx, "dx_noisy"] = new_label
-
-        if new_label != true_label:
-            flip_conf.setdefault(true_label, {})
-            flip_conf[true_label][new_label] = flip_conf[true_label].get(new_label, 0) + 1
-
-    df_out = df_sorted.sort_index().copy()
-    return df_out, flip_conf
-
-
-def apply_idn_from_oof(
-    train_df: pd.DataFrame,
-    oof_scores: Dict[str, float],
-    oof_probs: Dict[str, np.ndarray],
-    outer_fold: int,
-    seed: int,
-    noise_rate: float,
-    eta_max: float,
-    score_type: str,
-    arch: str,
-) -> Tuple[pd.DataFrame, pd.DataFrame, NoiseReport]:
-    """
-    Apply IDN noise to one outer-train split using cached OOF probabilities.
-    Returns train_clean, train_noisy, and a NoiseReport.
-    """
-    rng = np.random.default_rng(seed * 10_000 + outer_fold)
-
-    c2i, i2c = class_mapping(train_df["dx"].astype(str).tolist())
-
-    train_out, flip_conf = inject_noise_idn_with_caps(
-        train_df=train_df,
-        oof_scores=oof_scores,
-        oof_probs=oof_probs,
-        c2i=c2i,
-        i2c=i2c,
-        noise_rate=noise_rate,
-        eta_max=eta_max,
-        rng=rng,
-    )
-
-    train_clean = train_out.copy()
-    train_clean["dx"] = train_clean["dx_clean"]
-
-    train_noisy = train_out.copy()
-    train_noisy["dx"] = train_noisy["dx_noisy"]
-
-    keep_cols = ["image_id", "lesion_id", "dx", "dx_clean", "dx_noisy", "uncertainty"]
-    train_clean = train_clean[[c for c in keep_cols if c in train_clean.columns]]
-    train_noisy = train_noisy[[c for c in keep_cols if c in train_noisy.columns]]
-
-    n_train = len(train_out)
-    n_flipped = int((train_out["dx_clean"] != train_out["dx_noisy"]).sum())
-
-    flipped_mask = train_out["dx_clean"] != train_out["dx_noisy"]
-    flipped_unc = train_out.loc[flipped_mask, "uncertainty"].astype(float)
-
-    if len(flipped_unc) == 0:
-        u_min = u_med = u_max = float("nan")
-    else:
-        u_min = float(flipped_unc.min())
-        u_med = float(flipped_unc.median())
-        u_max = float(flipped_unc.max())
-
-    report = NoiseReport(
-        outer_fold=outer_fold,
-        seed=seed,
-        arch=arch,
-        score_type=score_type,
-        noise_rate=noise_rate,
-        n_train=n_train,
-        n_flipped=n_flipped,
-        class_counts_clean=train_out["dx_clean"].value_counts().to_dict(),
-        class_counts_noisy=train_out["dx_noisy"].value_counts().to_dict(),
-        flip_confusion=flip_conf,
-        flipped_uncertainty_min=u_min,
-        flipped_uncertainty_median=u_med,
-        flipped_uncertainty_max=u_max,
-    )
-
-    return train_clean, train_noisy, report
-
-
-def generate_oof_nestedcv(
+def generate_idn_outercv(
     df: pd.DataFrame,
     images_dir: Path,
     outer_folds: int,
-    inner_folds: int,
     seed: int,
-    score_type: str,
-    arch: str,
-    pretrained: bool,
-    teacher_epochs: int,
-    batch_size: int,
-    lr: float,
-    weight_decay: float,
-    num_workers: int,
-    use_amp: bool,
-    pin_memory: bool,
-) -> OOFOutputs:
+    tau: float,
+    *,
+    image_size: int = 224,
+    norm_std: float = 0.1,
+    batch_size: int = 64,
+    num_workers: int = 0,
+    pin_memory: bool = False,
+) -> IDNOutputs:
     """
-    Nested CV OOF generator:
-      - outer folds for evaluation (test stays clean)
-      - inner folds for out-of-fold uncertainty scoring
-      - returns OOF probabilities and uncertainty scores per outer fold
-    """
-    seed_everything(seed)
+    Generate outer CV folds where:
+      - test is clean
+      - train is corrupted using standard synthetic IDN (Algorithm 2)
 
+    Returns:
+      - fold_assignments (shared)
+      - per-fold train_clean / train_noisy / test_clean
+      - per-fold NoiseReport
+    """
     df = df.copy()
     df["image_id"] = df["image_id"].astype(str)
     df["lesion_id"] = df["lesion_id"].astype(str)
     df["dx"] = df["dx"].astype(str)
-    df = df.sort_values(["lesion_id", "image_id"]).reset_index(drop=True)
-
-    c2i, _ = class_mapping(df["dx"].tolist())
-    num_classes = len(c2i)
-
-    tf_train = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomVerticalFlip(p=0.5),
-        transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.05, hue=0.02),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
-    tf_eval = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    amp_enabled = use_amp and device.startswith("cuda")
 
     df_folds = make_outer_folds_lesion_stratified(df, n_splits=outer_folds, seed=seed)
-
-    fold_outputs: Dict[int, OOFFoldOutputs] = {}
-    outer_iter = tqdm(range(outer_folds), desc="Outer folds (OOF)", leave=True)
-
-    for outer_fold in outer_iter:
-        test_df = df_folds[df_folds["outer_fold"] == outer_fold].copy().reset_index(drop=True)
-        train_df = df_folds[df_folds["outer_fold"] != outer_fold].copy().reset_index(drop=True)
-
-        inner_seed = seed * 10_000 + outer_fold
-        train_df = make_inner_folds_lesion_stratified(train_df, n_splits=inner_folds, seed=inner_seed)
-
-        oof_scores: Dict[str, float] = {}
-        oof_probs: Dict[str, np.ndarray] = {}
-
-        inner_iter = tqdm(range(inner_folds), desc=f"  Inner folds (outer={outer_fold:02d})", leave=False)
-        for inner_fold in inner_iter:
-            inner_train = train_df[train_df["inner_fold"] != inner_fold].copy().reset_index(drop=True)
-            inner_val = train_df[train_df["inner_fold"] == inner_fold].copy().reset_index(drop=True)
-
-            ds_tr = HamDataset(inner_train, images_dir=images_dir, c2i=c2i, transform=tf_train)
-            ds_val = HamDataset(inner_val, images_dir=images_dir, c2i=c2i, transform=tf_eval)
-
-            dl_tr = DataLoader(
-                ds_tr, batch_size=batch_size, shuffle=True,
-                num_workers=num_workers, pin_memory=pin_memory
-            )
-            dl_val = DataLoader(
-                ds_val, batch_size=batch_size, shuffle=False,
-                num_workers=num_workers, pin_memory=pin_memory
-            )
-
-            teacher = build_resnet(arch=arch, num_classes=num_classes, pretrained=pretrained)
-
-            train_teacher(
-                model=teacher,
-                train_loader=dl_tr,
-                device=device,
-                epochs=teacher_epochs,
-                lr=lr,
-                weight_decay=weight_decay,
-                use_amp=amp_enabled,
-                desc=f"outer {outer_fold:02d} / inner {inner_fold:02d} ({arch})",
-            )
-
-            fold_scores, fold_probs = score_uncertainty_and_probs(
-                model=teacher,
-                loader=dl_val,
-                device=device,
-                score_type=score_type,
-            )
-
-            oof_scores.update(fold_scores)
-            oof_probs.update(fold_probs)
-
-            del teacher
-            if device.startswith("cuda"):
-                torch.cuda.empty_cache()
-
-        train_df_out = train_df.drop(columns=["inner_fold"], errors="ignore").copy()
-
-        fold_outputs[outer_fold] = OOFFoldOutputs(
-            train_df=train_df_out,
-            test_df=test_df[["image_id", "lesion_id", "dx"]].copy(),
-            oof_scores=oof_scores,
-            oof_probs=oof_probs,
-        )
-
     fold_assignments = df_folds[["image_id", "lesion_id", "dx", "outer_fold"]].copy()
-    return OOFOutputs(fold_assignments=fold_assignments, folds=fold_outputs)
 
+    folds_out: Dict[int, FoldOutputs] = {}
 
-def generate_idn_nestedcv(
-    df: pd.DataFrame,
-    images_dir: Path,
-    outer_folds: int,
-    inner_folds: int,
-    seed: int,
-    noise_rate: float,
-    eta_max: float,
-    score_type: str,
-    arch: str,
-    pretrained: bool,
-    teacher_epochs: int,
-    batch_size: int,
-    lr: float,
-    weight_decay: float,
-    num_workers: int,
-    use_amp: bool,
-    pin_memory: bool,
-) -> IDNOutputs:
-    """
-    Nested CV IDN generator:
-      - outer folds for evaluation (test stays clean)
-      - inner folds for out-of-fold uncertainty scoring
-      - flip top noise_rate uncertain samples in outer train split
-      - enforce per-class flip cap eta_max
-      - assign new labels probabilistically from teacher distribution
+    for fold_id in tqdm(range(outer_folds), desc="Outer folds (apply IDN)", leave=True):
+        test_df = df_folds[df_folds["outer_fold"] == fold_id].copy().reset_index(drop=True)
+        train_df = df_folds[df_folds["outer_fold"] != fold_id].copy().reset_index(drop=True)
 
-    Returns fold assignments + per-fold clean/noisy dataframes + reports.
-    """
-    oof_outputs = generate_oof_nestedcv(
-        df=df,
-        images_dir=images_dir,
-        outer_folds=outer_folds,
-        inner_folds=inner_folds,
-        seed=seed,
-        score_type=score_type,
-        arch=arch,
-        pretrained=pretrained,
-        teacher_epochs=teacher_epochs,
-        batch_size=batch_size,
-        lr=lr,
-        weight_decay=weight_decay,
-        num_workers=num_workers,
-        use_amp=use_amp,
-        pin_memory=pin_memory,
-    )
-
-    fold_outputs: Dict[int, FoldOutputs] = {}
-    outer_iter = tqdm(range(outer_folds), desc="Apply IDN per outer fold", leave=True)
-
-    for outer_fold in outer_iter:
-        fold = oof_outputs.folds[outer_fold]
-
-        train_clean, train_noisy, report = apply_idn_from_oof(
-            train_df=fold.train_df,
-            oof_scores=fold.oof_scores,
-            oof_probs=fold.oof_probs,
-            outer_fold=outer_fold,
-            seed=seed,
-            noise_rate=noise_rate,
-            eta_max=eta_max,
-            score_type=score_type,
-            arch=arch,
+        # Corrupt only the train split
+        df_corrupted, report = generate_instance_dependent_noisy_labels(
+            df=train_df[["image_id", "lesion_id", "dx"]].copy(),
+            images_dir=images_dir,
+            tau=tau,
+            seed=(seed * 10_000 + fold_id),
+            image_size=image_size,
+            norm_std=norm_std,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
         )
+        report.outer_fold = int(fold_id)
 
-        test_clean = fold.test_df.copy()
+        train_clean = df_corrupted.copy()
+        train_clean["dx"] = train_clean["dx_clean"]
 
-        fold_outputs[outer_fold] = FoldOutputs(
+        train_noisy = df_corrupted.copy()
+        train_noisy["dx"] = train_noisy["dx_noisy"]
+
+        # Keep columns consistent with the rest of the repo
+        keep_cols = ["image_id", "lesion_id", "dx", "dx_clean", "dx_noisy"]
+        train_clean = train_clean[[c for c in keep_cols if c in train_clean.columns]]
+        train_noisy = train_noisy[[c for c in keep_cols if c in train_noisy.columns]]
+        test_clean = test_df[["image_id", "lesion_id", "dx"]].copy()
+
+        folds_out[int(fold_id)] = FoldOutputs(
             train_clean=train_clean,
             train_noisy=train_noisy,
             test_clean=test_clean,
             report=report,
         )
 
-        outer_iter.set_postfix(
-            fold=f"{outer_fold:02d}",
-            flipped=f"{report.n_flipped}/{report.n_train} ({(report.n_flipped/max(report.n_train,1))*100:.1f}%)"
-        )
-
-    return IDNOutputs(fold_assignments=oof_outputs.fold_assignments, folds=fold_outputs)
+    return IDNOutputs(fold_assignments=fold_assignments, folds=folds_out)

@@ -1,3 +1,4 @@
+# src/utils/prepare_classification_cv_with_idn.py
 from __future__ import annotations
 
 import json
@@ -5,43 +6,33 @@ from dataclasses import asdict
 from pathlib import Path
 
 import pandas as pd
+from tqdm import tqdm
 
-from src.classification.noise_idn import (
-    generate_oof_nestedcv,
-    apply_idn_from_oof,
-)
+from src.common.seed import seed_everything
+from src.classification.noise_idn import generate_idn_outercv
 
-# CONFIGS
+
+# =========================
+# CONFIG (edit and run)
+# =========================
 SEED = 42
 
 # Outer evaluation CV
-OUTER_FOLDS = 5  # set to 5 normally, but 2 for quick testing.
+OUTER_FOLDS = 5  # 5 normally, smaller for quick tests
 
-# Inner CV 
-INNER_FOLDS = 5  # set to 5 normally, but 2 for quick testing.
+# Noise settings (standard synthetic IDN, Algorithm 2)
+NOISE_RATES = [0.05, 0.10, 0.15, 0.20]  # tau values
+NORM_STD = 0.10                         # std in TruncNorm(tau, norm_std^2)
 
-# Noise settings (IDN)
-NOISE_RATES = [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35]  # Multiple global noise levels.
-ETA_MAX = 0.40 # No more than 40% of a given class is flipped.
-SCORE_TYPE = "p_true"
-
-# Teacher model for uncertainty ranking
-ARCH = "resnet18"
-PRETRAINED = True
-TEACHER_EPOCHS = 5  # Set to 5 normally, but 1 for quick testing.
-
-# Training hyperparams for teacher
-BATCH_SIZE = 64  # Set to 64 normally, but 16 for quick testing.
-LR = 3e-4
-WEIGHT_DECAY = 1e-4
+# IDN feature extraction (pixel-vector)
+IMAGE_SIZE = 224
 
 # Runtime
+BATCH_SIZE = 64
 NUM_WORKERS = 2
-USE_AMP = True
 PIN_MEMORY = True
 
 
-# Project Paths
 def project_root() -> Path:
     """
     src/utils/prepare_classification_cv_with_idn.py -> parents[2] is repo root.
@@ -50,6 +41,8 @@ def project_root() -> Path:
 
 
 def main() -> None:
+    seed_everything(SEED)
+
     root = project_root()
 
     # Input: one-image-per-lesion processed dataset
@@ -62,98 +55,76 @@ def main() -> None:
     out_root.mkdir(parents=True, exist_ok=True)
 
     print("\n========================================")
-    print("Prepare HAM10000 CV folds + IDN noise")
+    print("Prepare HAM10000 Outer CV + Standard Synthetic IDN (Algorithm 2)")
     print("========================================")
     print("Input metadata:", meta_path)
     print("Input images  :", images_dir)
     print("Output folder :", out_root)
     print("----------------------------------------")
     print(f"SEED={SEED}")
-    print(f"OUTER_FOLDS={OUTER_FOLDS} | INNER_FOLDS={INNER_FOLDS}")
-    print(f"NOISE_RATES={NOISE_RATES} | ETA_MAX={ETA_MAX}")
-    print(f"SCORE_TYPE={SCORE_TYPE}")
-    print(f"TEACHER={ARCH} | PRETRAINED={PRETRAINED} | EPOCHS={TEACHER_EPOCHS}")
-    print(f"BATCH_SIZE={BATCH_SIZE} | LR={LR} | WEIGHT_DECAY={WEIGHT_DECAY}")
-    print(f"NUM_WORKERS={NUM_WORKERS} | AMP={USE_AMP} | PIN_MEMORY={PIN_MEMORY}")
+    print(f"OUTER_FOLDS={OUTER_FOLDS}")
+    print(f"NOISE_RATES(tau)={NOISE_RATES} | NORM_STD={NORM_STD}")
+    print(f"IMAGE_SIZE={IMAGE_SIZE}")
+    print(f"BATCH_SIZE={BATCH_SIZE} | NUM_WORKERS={NUM_WORKERS} | PIN_MEMORY={PIN_MEMORY}")
     print("========================================\n")
 
     df = pd.read_csv(meta_path)
 
-    # ============================================================
-    # STAGE 1 — Generate OOF probabilities (expensive, done once)
-    # ============================================================
-    print("\nGenerating OOF predictions (nested CV)...\n")
+    # Save fold assignments once per run (same across tau)
+    # Note: fold assignments depend only on SEED/OUTER_FOLDS, not tau.
+    # We write it from the first tau run and reuse it for consistency.
+    fold_assign_written = False
 
-    oof_outputs = generate_oof_nestedcv(
-        df=df,
-        images_dir=images_dir,
-        outer_folds=OUTER_FOLDS,
-        inner_folds=INNER_FOLDS,
-        seed=SEED,
-        score_type=SCORE_TYPE,
-        arch=ARCH,
-        pretrained=PRETRAINED,
-        teacher_epochs=TEACHER_EPOCHS,
-        batch_size=BATCH_SIZE,
-        lr=LR,
-        weight_decay=WEIGHT_DECAY,
-        num_workers=NUM_WORKERS,
-        use_amp=USE_AMP,
-        pin_memory=PIN_MEMORY,
-    )
+    for tau in NOISE_RATES:
+        print(f"\nApplying standard synthetic IDN with tau = {tau:.2f}")
 
-    # Save fold assignments (shared across all noise levels)
-    fold_assign_path = out_root / "fold_assignments.csv"
-    oof_outputs.fold_assignments.to_csv(fold_assign_path, index=False)
-    print("Saved:", fold_assign_path)
-
-    # ============================================================
-    # STAGE 2 — Apply IDN for multiple global noise rates
-    # ============================================================
-
-    for noise_rate in NOISE_RATES:
-        print(f"\nApplying IDN noise for global rate = {noise_rate:.2f}")
-
-        rate_folder = out_root / f"idn_r{int(noise_rate * 100):02d}"
+        rate_folder = out_root / f"idn_algo2_tau{int(tau * 100):02d}"
         rate_folder.mkdir(parents=True, exist_ok=True)
 
-        for fold_id, fold_data in oof_outputs.folds.items():
+        outputs = generate_idn_outercv(
+            df=df,
+            images_dir=images_dir,
+            outer_folds=OUTER_FOLDS,
+            seed=SEED,
+            tau=tau,
+            image_size=IMAGE_SIZE,
+            norm_std=NORM_STD,
+            batch_size=BATCH_SIZE,
+            num_workers=NUM_WORKERS,
+            pin_memory=PIN_MEMORY,
+        )
+
+        if not fold_assign_written:
+            fold_assign_path = out_root / "fold_assignments.csv"
+            outputs.fold_assignments.to_csv(fold_assign_path, index=False)
+            print("Saved:", fold_assign_path)
+            fold_assign_written = True
+
+        # Write per-fold artifacts
+        for fold_id, fold_data in tqdm(outputs.folds.items(), desc=f"Write folds (tau={tau:.2f})", leave=False):
             fold_dir = rate_folder / f"fold_{fold_id:02d}"
             fold_dir.mkdir(parents=True, exist_ok=True)
-
-            train_clean, train_noisy, report = apply_idn_from_oof(
-                train_df=fold_data.train_df,
-                oof_scores=fold_data.oof_scores,
-                oof_probs=fold_data.oof_probs,
-                outer_fold=fold_id,
-                seed=SEED,
-                noise_rate=noise_rate,
-                eta_max=ETA_MAX,
-                score_type=SCORE_TYPE,
-                arch=ARCH,
-            )
-
-            test_clean = fold_data.test_df.copy()
 
             train_clean_path = fold_dir / "train_clean.csv"
             train_noisy_path = fold_dir / "train_noisy.csv"
             test_clean_path = fold_dir / "test_clean.csv"
             report_path = fold_dir / "noise_report.json"
 
-            train_clean.to_csv(train_clean_path, index=False)
-            train_noisy.to_csv(train_noisy_path, index=False)
-            test_clean.to_csv(test_clean_path, index=False)
+            fold_data.train_clean.to_csv(train_clean_path, index=False)
+            fold_data.train_noisy.to_csv(train_noisy_path, index=False)
+            fold_data.test_clean.to_csv(test_clean_path, index=False)
 
             with open(report_path, "w", encoding="utf-8") as f:
-                json.dump(asdict(report), f, indent=2)
+                json.dump(asdict(fold_data.report), f, indent=2)
 
-            print(
-                f"[r={noise_rate:.2f} | fold {fold_id:02d}] "
-                f"flipped {report.n_flipped}/{report.n_train}"
-            )
+        # Quick summary
+        flipped_total = sum(v.report.n_flipped for v in outputs.folds.values())
+        train_total = sum(v.report.n_train for v in outputs.folds.values())
+        print(f"tau={tau:.2f} | flipped total {flipped_total}/{train_total} "
+              f"({(flipped_total / max(train_total, 1)) * 100:.1f}%) across all outer folds")
 
     print("\nDone.")
-    print("CV + multi-rate IDN artifacts written to:", out_root.resolve())
+    print("CV + standard synthetic IDN artifacts written to:", out_root.resolve())
 
 
 if __name__ == "__main__":
