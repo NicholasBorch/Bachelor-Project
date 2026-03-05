@@ -127,7 +127,6 @@ def _fit_baseline(
     return model
 
 
-@torch.no_grad()
 def collect_oof_probabilities(
     train_df: pd.DataFrame,
     images_dir: Path,
@@ -158,6 +157,7 @@ def collect_oof_probabilities(
         inner_val_df   = df_inner[df_inner["inner_fold"] == inner_fold_id].copy().reset_index(drop=True)
         val_indices    = df_inner[df_inner["inner_fold"] == inner_fold_id].index.tolist()
 
+        # Training requires gradients — no torch.no_grad() here
         model = _fit_baseline(
             model=build_resnet(num_classes=num_classes, pretrained=True),
             train_df=inner_train_df,
@@ -172,16 +172,17 @@ def collect_oof_probabilities(
             device=device,
         )
 
-        # Collect softmax probabilities on the inner validation split
+        # Inference only — disable gradients for probability collection
         model.eval()
         val_ds     = HamTensorDataset(inner_val_df, images_dir, c2i, get_transforms(image_size, augment=False))
         val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False,
                                 num_workers=num_workers, pin_memory=True)
 
-        val_probs = np.concatenate([
-            F.softmax(model(x.to(device)), dim=1).cpu().numpy()
-            for x, _, _ in val_loader
-        ], axis=0)
+        with torch.no_grad():
+            val_probs = np.concatenate([
+                F.softmax(model(x.to(device)), dim=1).cpu().numpy()
+                for x, _, _ in val_loader
+            ], axis=0)
 
         # Place probabilities back at their correct positions in the full training array
         for local_idx, global_idx in enumerate(val_indices):
