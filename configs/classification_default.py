@@ -1,29 +1,19 @@
-# THIS IS EXAMPLE DRAFT
+# Shared configuration for all classification experiments.
+
+# Reproducibility
+SEED = 10
 
 # Cross-validation
-N_FOLDS = 10
-SEED = 42
+OUTER_FOLDS = 5
 
-# Dataset
-DATASET = "HAM10000"
+# Noise injection
+NOISE_RATES = [0.0, 0.05, 0.10, 0.15, 0.20]
+NORM_STD = 0.10
 
-# Noise
-NOISE_TYPE = "idn"
-NOISE_RATE = 0.2
-
-# Method
-METHOD = "baseline"
-
-# Model
-MODEL_NAME = "resnet18"
+# Image preprocessing
 IMAGE_SIZE = 224
 
-# Training
+# DataLoader
 BATCH_SIZE = 64
-LR = 1e-3
-EPOCHS = 50
-WEIGHT_DECAY = 1e-4
-
-# Dropout / MC dropout
-USE_MC_DROPOUT = False
-MC_SAMPLES = 10
+NUM_WORKERS = 2
+PIN_MEMORY = True
