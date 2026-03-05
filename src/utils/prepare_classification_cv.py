@@ -1,4 +1,3 @@
-# src/utils/prepare_classification_cv.py
 # One-time script to generate outer CV folds with IDN-corrupted training splits.
 # Run this once before any training to produce the fold artifacts used by all methods.
 
