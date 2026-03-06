@@ -1,0 +1,60 @@
+{
+  "outer_fold": 3,
+  "seed": 100003,
+  "tau": 0.1,
+  "norm_std": 0.1,
+  "num_classes": 7,
+  "feature_size": 150528,
+  "n_train": 5976,
+  "n_flipped": 769,
+  "class_counts_clean": {
+    "nv": 4323,
+    "bkl": 581,
+    "mel": 491,
+    "bcc": 261,
+    "akiec": 183,
+    "vasc": 78,
+    "df": 59
+  },
+  "class_counts_noisy": {
+    "nv": 3805,
+    "mel": 831,
+    "bkl": 525,
+    "df": 300,
+    "bcc": 287,
+    "akiec": 154,
+    "vasc": 74
+  },
+  "flip_confusion": {
+    "nv": {
+      "mel": 406,
+      "df": 136
+    },
+    "akiec": {
+      "nv": 23,
+      "bkl": 10
+    },
+    "mel": {
+      "bcc": 65,
+      "bkl": 2
+    },
+    "bkl": {
+      "df": 67,
+      "mel": 1
+    },
+    "bcc": {
+      "df": 39
+    },
+    "vasc": {
+      "df": 7,
+      "akiec": 4,
+      "nv": 1
+    },
+    "df": {
+      "vasc": 8
+    }
+  },
+  "flip_rate_min": 9.705462616693694e-06,
+  "flip_rate_median": 0.12015555053949356,
+  "flip_rate_max": 0.5200515389442444
+}
