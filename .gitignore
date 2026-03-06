@@ -1,7 +1,8 @@
 # Data
 data/raw/
-data/processed/HAM10000/one_image_per_lesion/
-data/processed/WMH/
+data/processed/
+# data/processed/HAM10000/one_image_per_lesion/
+# data/processed/WMH/
 
 # Python
 __pycache__/
