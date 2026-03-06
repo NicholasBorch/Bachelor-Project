@@ -30,7 +30,7 @@ from configs.classification_default import (
 # CONFIG — edit before running
 # =============================================================
 METHOD     = "baseline"       # "baseline" | "elr" | "sce" | "asyco"
-NOISE_TYPE = "standard_idn"   # "standard_idn" | "feature_driven_idn"
+NOISE_TYPE = "feature_driven_idn"   # "standard_idn" | "feature_driven_idn"
 
 # Subset of NOISE_RATES to run — set to NOISE_RATES to run all
 TAU_VALUES = NOISE_RATES
