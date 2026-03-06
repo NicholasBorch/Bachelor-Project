@@ -70,6 +70,17 @@ def generate_instance_dependent_noisy_labels(
     pin_memory: bool = False,
 ) -> Tuple[pd.DataFrame, NoiseReport]:
     
+    # Applies IDN corruption to a dataframe split, returns noisy labels and a report
+    df = df.copy().reset_index(drop=True)
+    df["image_id"] = df["image_id"].astype(str)
+    df["lesion_id"] = df["lesion_id"].astype(str)
+    df["dx"] = df["dx"].astype(str)
+
+    c2i, i2c = class_mapping(df["dx"].tolist())
+    num_classes = len(c2i)
+    feature_size = 3 * image_size * image_size
+    n = len(df)
+    
     # Short-circuit for clean baseline — no flipping should occur
     if tau == 0.0:
         df_out = df.copy()
@@ -91,17 +102,6 @@ def generate_instance_dependent_noisy_labels(
             flip_rate_max=0.0,
         )
         return df_out, report
-    
-    # Applies IDN corruption to a dataframe split, returns noisy labels and a report
-    df = df.copy().reset_index(drop=True)
-    df["image_id"] = df["image_id"].astype(str)
-    df["lesion_id"] = df["lesion_id"].astype(str)
-    df["dx"] = df["dx"].astype(str)
-
-    c2i, i2c = class_mapping(df["dx"].tolist())
-    num_classes = len(c2i)
-    feature_size = 3 * image_size * image_size
-    n = len(df)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 

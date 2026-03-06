@@ -200,6 +200,16 @@ def generate_feature_driven_noisy_labels(
     norm_std: float = 0.1,
 ) -> Tuple[pd.DataFrame, NoiseReport]:
     
+    # Applies feature-driven IDN corruption using pre-computed OOF softmax probabilities
+    df = df.copy().reset_index(drop=True)
+    df["image_id"] = df["image_id"].astype(str)
+    df["lesion_id"] = df["lesion_id"].astype(str)
+    df["dx"]       = df["dx"].astype(str)
+
+    c2i, i2c    = class_mapping(df["dx"].tolist())
+    num_classes = len(c2i)
+    n           = len(df)
+    
     # Short-circuit for clean baseline — no flipping should occur
     if tau == 0.0:
         df_out = df.copy()
@@ -222,15 +232,6 @@ def generate_feature_driven_noisy_labels(
         )
         return df_out, report
     
-    # Applies feature-driven IDN corruption using pre-computed OOF softmax probabilities
-    df = df.copy().reset_index(drop=True)
-    df["image_id"] = df["image_id"].astype(str)
-    df["lesion_id"] = df["lesion_id"].astype(str)
-    df["dx"]       = df["dx"].astype(str)
-
-    c2i, i2c    = class_mapping(df["dx"].tolist())
-    num_classes = len(c2i)
-    n           = len(df)
     device      = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Fix seeds for reproducible flip rate sampling
