@@ -28,7 +28,6 @@ from src.classification.train import (
     make_weighted_sampler,
     compute_class_weights,
     train_one_epoch,
-    evaluate,
 )
 
 
@@ -67,7 +66,6 @@ class IDNOutputs:
 def _fit_baseline(
     model: nn.Module,
     train_df: pd.DataFrame,
-    val_df: pd.DataFrame,
     images_dir: Path,
     c2i: dict,
     *,
@@ -77,24 +75,17 @@ def _fit_baseline(
     lr: float,
     num_workers: int,
     device: torch.device,
-    patience: int = 5,
 ) -> nn.Module:
     # Trains a class-balanced ResNet for OOF probability collection only
-    # Uses weighted sampler and class-weighted loss to prevent majority class bias
+    # Fixed epoch count with no early stopping — inner test split never influences training
     model = model.to(device)
     num_classes  = len(c2i)
     train_labels = [c2i[str(dx)] for dx in train_df["dx"]]
 
     train_ds = HamTensorDataset(train_df, images_dir, c2i, get_transforms(image_size, augment=True))
-    val_ds   = HamTensorDataset(val_df,   images_dir, c2i, get_transforms(image_size, augment=False))
-
     train_loader = DataLoader(
         train_ds, batch_size=batch_size,
         sampler=make_weighted_sampler(train_labels),
-        num_workers=num_workers, pin_memory=True,
-    )
-    val_loader = DataLoader(
-        val_ds, batch_size=batch_size, shuffle=False,
         num_workers=num_workers, pin_memory=True,
     )
 
@@ -102,28 +93,11 @@ def _fit_baseline(
     optimiser = torch.optim.Adam(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimiser, T_max=epochs)
 
-    best_val_loss = float("inf")
-    best_state    = None
-    patience_ctr  = 0
-
     for epoch in range(epochs):
-        train_loss           = train_one_epoch(model, train_loader, criterion, optimiser, device)
-        val_loss, val_acc    = evaluate(model, val_loader, criterion, device)
+        train_loss = train_one_epoch(model, train_loader, criterion, optimiser, device)
         scheduler.step()
-        print(f"    Epoch {epoch+1:03d}/{epochs} | "
-              f"train={train_loss:.4f} val={val_loss:.4f} acc={val_acc:.4f}")
+        print(f"    Epoch {epoch+1:03d}/{epochs} | train={train_loss:.4f}")
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_state    = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-            patience_ctr  = 0
-        else:
-            patience_ctr += 1
-            if patience_ctr >= patience:
-                print(f"    Early stopping at epoch {epoch+1}")
-                break
-
-    model.load_state_dict(best_state)
     return model
 
 
@@ -157,11 +131,10 @@ def collect_oof_probabilities(
         inner_val_df   = df_inner[df_inner["inner_fold"] == inner_fold_id].copy().reset_index(drop=True)
         val_indices    = df_inner[df_inner["inner_fold"] == inner_fold_id].index.tolist()
 
-        # Training requires gradients — no torch.no_grad() here
+        # Train on inner training split only — inner val split never touches training
         model = _fit_baseline(
             model=build_resnet(num_classes=num_classes, pretrained=True),
             train_df=inner_train_df,
-            val_df=inner_val_df,
             images_dir=images_dir,
             c2i=c2i,
             image_size=image_size,
@@ -172,7 +145,7 @@ def collect_oof_probabilities(
             device=device,
         )
 
-        # Inference only — disable gradients for probability collection
+        # Collect softmax probabilities on inner val split — inference only
         model.eval()
         val_ds     = HamTensorDataset(inner_val_df, images_dir, c2i, get_transforms(image_size, augment=False))
         val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False,
