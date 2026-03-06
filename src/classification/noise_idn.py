@@ -92,6 +92,7 @@ def generate_instance_dependent_noisy_labels(
             tau=0.0,
             norm_std=float(norm_std),
             num_classes=int(num_classes),
+            feature_size=int(3 * image_size * image_size),
             n_train=int(n),
             n_flipped=0,
             class_counts_clean=df_out["dx_clean"].value_counts().to_dict(),
