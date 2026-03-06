@@ -16,7 +16,7 @@ import seaborn as sns
 
 
 # Point this at your data/processed/HAM10000/cv directory
-CV_ROOT = Path("data/processed/HAM10000/cv")
+CV_ROOT = Path("data/processed/HAM10000/cv_feature_driven")
 
 # Classes in a fixed display order (minority classes last for clarity)
 CLASS_ORDER = ["nv", "bkl", "mel", "bcc", "akiec", "vasc", "df"]

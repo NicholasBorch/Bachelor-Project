@@ -199,6 +199,29 @@ def generate_feature_driven_noisy_labels(
     *,
     norm_std: float = 0.1,
 ) -> Tuple[pd.DataFrame, NoiseReport]:
+    
+    # Short-circuit for clean baseline — no flipping should occur
+    if tau == 0.0:
+        df_out = df.copy()
+        df_out["dx_clean"] = df_out["dx"]
+        df_out["dx_noisy"] = df_out["dx"]
+        report = NoiseReport(
+            outer_fold=-1,
+            seed=int(seed),
+            tau=0.0,
+            norm_std=float(norm_std),
+            num_classes=int(num_classes),
+            n_train=int(n),
+            n_flipped=0,
+            class_counts_clean=df_out["dx_clean"].value_counts().to_dict(),
+            class_counts_noisy=df_out["dx_noisy"].value_counts().to_dict(),
+            flip_confusion={},
+            flip_rate_min=0.0,
+            flip_rate_median=0.0,
+            flip_rate_max=0.0,
+        )
+        return df_out, report
+    
     # Applies feature-driven IDN corruption using pre-computed OOF softmax probabilities
     df = df.copy().reset_index(drop=True)
     df["image_id"] = df["image_id"].astype(str)
