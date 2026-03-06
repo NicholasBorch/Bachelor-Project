@@ -1,0 +1,84 @@
+{
+  "outer_fold": 3,
+  "seed": 100003,
+  "tau": 0.15,
+  "norm_std": 0.1,
+  "num_classes": 7,
+  "n_train": 5976,
+  "n_flipped": 982,
+  "class_counts_clean": {
+    "nv": 4323,
+    "bkl": 581,
+    "mel": 491,
+    "bcc": 261,
+    "akiec": 183,
+    "vasc": 78,
+    "df": 59
+  },
+  "class_counts_noisy": {
+    "nv": 3649,
+    "bkl": 742,
+    "mel": 719,
+    "akiec": 275,
+    "bcc": 266,
+    "vasc": 168,
+    "df": 157
+  },
+  "flip_confusion": {
+    "nv": {
+      "mel": 261,
+      "bkl": 167,
+      "akiec": 72,
+      "vasc": 75,
+      "df": 90,
+      "bcc": 32
+    },
+    "mel": {
+      "akiec": 27,
+      "bkl": 45,
+      "vasc": 3,
+      "df": 3,
+      "bcc": 4,
+      "nv": 8
+    },
+    "bcc": {
+      "bkl": 16,
+      "nv": 2,
+      "mel": 7,
+      "vasc": 12,
+      "akiec": 14,
+      "df": 5
+    },
+    "bkl": {
+      "df": 5,
+      "akiec": 17,
+      "mel": 42,
+      "bcc": 9,
+      "nv": 9,
+      "vasc": 2
+    },
+    "akiec": {
+      "bkl": 16,
+      "mel": 7,
+      "nv": 1,
+      "bcc": 9,
+      "vasc": 1,
+      "df": 5
+    },
+    "df": {
+      "vasc": 3,
+      "bcc": 2,
+      "nv": 2,
+      "akiec": 1,
+      "mel": 1,
+      "bkl": 1
+    },
+    "vasc": {
+      "nv": 1,
+      "bcc": 5
+    }
+  },
+  "flip_rate_min": 2.0109591787331738e-05,
+  "flip_rate_median": 0.15853360295295715,
+  "flip_rate_max": 0.5676999092102051
+}
