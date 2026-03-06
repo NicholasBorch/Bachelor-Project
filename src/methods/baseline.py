@@ -1,0 +1,151 @@
+# Standard cross-entropy baseline for HAM10000 classification.
+# Trains ResNet-50 with weighted cross-entropy and weighted sampler on noisy
+# training folds, evaluates on clean test folds at the end of fixed training.
+# No noise handling — serves as the reference curve for all method comparisons.
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Optional
+
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+
+from src.classification.dataset import HamTensorDataset
+from src.classification.models import build_resnet
+from src.classification.train import (
+    compute_class_weights,
+    get_transforms,
+    make_weighted_sampler,
+    train_one_epoch,
+)
+from src.common.io import class_mapping
+from src.common.logging import ResultsLogger, RunConfig, make_output_dir
+from src.common.metrics import compute_metrics, print_metrics
+from src.common.seed import seed_everything
+
+
+def run_baseline_fold(
+    train_noisy_df: pd.DataFrame,
+    test_clean_df: pd.DataFrame,
+    images_dir: Path,
+    results_root: Path,
+    *,
+    tau: float,
+    outer_fold: int,
+    seed: int,
+    noise_type: str = "standard_idn",
+    backbone_depth: int = 50,
+    image_size: int = 224,
+    epochs: int = 100,
+    batch_size: int = 64,
+    lr: float = 1e-4,
+    num_workers: int = 2,
+    device: Optional[torch.device] = None,
+) -> dict:
+    # Trains baseline for a fixed number of epochs on one noisy training fold
+    # and evaluates once on the clean test fold after the final epoch
+    seed_everything(seed)
+
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Build label mappings from the union of train and test label sets
+    all_labels  = pd.concat([train_noisy_df["dx"], test_clean_df["dx"]]).tolist()
+    c2i, i2c    = class_mapping(all_labels)
+    num_classes = len(c2i)
+    class_names = [i2c[i] for i in range(num_classes)]
+
+    train_labels = [c2i[str(dx)] for dx in train_noisy_df["dx"]]
+
+    # Datasets
+    train_ds = HamTensorDataset(
+        train_noisy_df, images_dir, c2i, get_transforms(image_size, augment=True)
+    )
+    test_ds = HamTensorDataset(
+        test_clean_df, images_dir, c2i, get_transforms(image_size, augment=False)
+    )
+
+    # Weighted sampler ensures balanced class representation in every batch
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=batch_size,
+        sampler=make_weighted_sampler(train_labels),
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+    test_loader = DataLoader(
+        test_ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+
+    # Model, loss, optimiser, scheduler
+    model     = build_resnet(num_classes=num_classes, pretrained=True, depth=backbone_depth).to(device)
+    criterion = nn.CrossEntropyLoss(
+        weight=compute_class_weights(train_labels, num_classes, device)
+    )
+    optimiser = torch.optim.Adam(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimiser, T_max=epochs)
+
+    # Logger writes config and per-epoch training metrics to disk
+    out_dir = make_output_dir(results_root, "baseline", tau, outer_fold, noise_type)
+    config  = RunConfig(
+        method="baseline",
+        tau=tau,
+        outer_fold=outer_fold,
+        seed=seed,
+        backbone=f"resnet{backbone_depth}",
+        epochs=epochs,
+        batch_size=batch_size,
+        lr=lr,
+        image_size=image_size,
+        noise_type=noise_type,
+    )
+    logger = ResultsLogger(out_dir, config)
+
+    print(f"\n--- Baseline | noise={noise_type} | tau={tau:.2f} | fold={outer_fold} ---")
+    print(f"    Train samples : {len(train_ds)}")
+    print(f"    Test samples  : {len(test_ds)}")
+    print(f"    Device        : {device} | Backbone: resnet{backbone_depth}")
+    print(f"    Epochs        : {epochs}")
+
+    # Fixed-epoch training loop — no early stopping
+    for epoch in range(epochs):
+        train_loss = train_one_epoch(model, train_loader, criterion, optimiser, device)
+        scheduler.step()
+
+        # Log training loss each epoch; test evaluation happens once at the end
+        logger.log_epoch(epoch + 1, train_loss, float("nan"), float("nan"))
+        print(f"    Epoch {epoch+1:03d}/{epochs} | train_loss={train_loss:.4f}")
+
+    # Single test evaluation after all epochs complete
+    model.eval()
+    all_true, all_pred, all_prob = [], [], []
+
+    with torch.no_grad():
+        for x, y, _ in test_loader:
+            x      = x.to(device)
+            logits = model(x)
+            probs  = torch.softmax(logits, dim=1).cpu().numpy()
+            preds  = logits.argmax(dim=1).cpu().numpy()
+            all_prob.append(probs)
+            all_pred.append(preds)
+            all_true.append(y.numpy())
+
+    y_true = np.concatenate(all_true)
+    y_pred = np.concatenate(all_pred)
+    y_prob = np.concatenate(all_prob)
+
+    metrics = compute_metrics(y_true, y_pred, y_prob, class_names)
+    logger.log_test_metrics(metrics)
+
+    print(f"\n    Test results (fold={outer_fold}, tau={tau:.2f}):")
+    print_metrics(metrics, prefix="    ")
+
+    return metrics
