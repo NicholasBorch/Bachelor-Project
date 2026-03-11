@@ -1,0 +1,13 @@
+{
+  "method": "baseline",
+  "tau": 0.25,
+  "outer_fold": 1,
+  "seed": 100001,
+  "backbone": "resnet50",
+  "epochs": 100,
+  "batch_size": 64,
+  "lr": 0.0001,
+  "image_size": 224,
+  "noise_type": "feature_driven_idn",
+  "extra": null
+}
