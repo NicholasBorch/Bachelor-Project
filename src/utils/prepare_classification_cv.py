@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from src.common.io import project_root
 from src.common.seed import seed_everything
-from src.classification.noise_idn import generate_idn_outercv
+from src.classification.standardized_noise_idn import generate_idn_outercv
 from configs.classification_default import (
     SEED,
     OUTER_FOLDS,
