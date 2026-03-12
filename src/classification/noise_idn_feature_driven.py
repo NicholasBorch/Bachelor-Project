@@ -133,7 +133,7 @@ def collect_oof_probabilities(
 
         # Train on inner training split only — inner val split never touches training
         model = _fit_baseline(
-            model=build_resnet(num_classes=num_classes, pretrained=True),
+            model=build_resnet(num_classes=num_classes, pretrained=True, depth=18),
             train_df=inner_train_df,
             images_dir=images_dir,
             c2i=c2i,
