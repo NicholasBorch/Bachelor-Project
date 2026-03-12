@@ -36,7 +36,7 @@ def main() -> None:
     images_dir = ham_one / "images"
 
     # Output: CV fold artifacts written here
-    out_root = root / "data" / "processed" / "HAM10000" / "cv"
+    out_root = root / "data" / "processed" / "HAM10000" / "cv2"
     out_root.mkdir(parents=True, exist_ok=True)
 
     print("\n========================================")
