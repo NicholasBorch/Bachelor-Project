@@ -131,7 +131,9 @@ def main() -> None:
                 completed += 1
 
             except Exception as e:
+                import traceback
                 print(f"  ERROR — tau={tau:.2f} fold={fold_id}: {e}")
+                traceback.print_exc()
                 failed += 1
                 continue
 
