@@ -30,7 +30,7 @@ from configs.classification_default import (
 # CONFIG — edit before running
 # =============================================================
 METHOD     = "baseline"       # "baseline" | "elr" | "sce" | "asyco"
-NOISE_TYPE = "feature_driven_idn"   # "standard_idn" | "feature_driven_idn"
+NOISE_TYPE = "standardized_idn"   # "standard_idn" | "feature_driven_idn" | "standardized_idn"
 
 # Subset of NOISE_RATES to run — set to NOISE_RATES to run all
 TAU_VALUES = NOISE_RATES
@@ -47,6 +47,7 @@ METHOD_REGISTRY = {
 NOISE_TYPE_TO_CV_DIR = {
     "standard_idn":       "cv",
     "feature_driven_idn": "cv_feature_driven",
+    "standardized_idn":   "cv2",
 }
 
 
@@ -54,6 +55,8 @@ def get_fold_paths(cv_root: Path, tau: float, fold_id: int) -> tuple[Path, Path]
     # Returns paths to train_noisy and test_clean CSVs for one fold
     if "feature_driven" in str(cv_root):
         tau_folder = "clean" if tau == 0.0 else f"idn_feature_tau{int(tau * 100):02d}"
+    elif "standardized" in str(cv_root):
+        tau_folder = "clean" if tau == 0.0 else f"idn_standardized_tau{int(tau * 100):02d}"
     else:
         tau_folder = "clean" if tau == 0.0 else f"idn_tau{int(tau * 100):02d}"
 
