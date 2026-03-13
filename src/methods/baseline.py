@@ -121,7 +121,7 @@ def run_baseline_fold(
         scheduler.step()
 
         # Log training loss each epoch; test evaluation happens once at the end
-        logger.log_epoch(epoch + 1, train_loss, float("nan"), float("nan"))
+        logger.log_epoch(epoch + 1, train_loss)
         print(f"    Epoch {epoch+1:03d}/{epochs} | train_loss={train_loss:.4f}")
 
     # Single test evaluation after all epochs complete
