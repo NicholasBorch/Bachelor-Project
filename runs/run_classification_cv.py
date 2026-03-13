@@ -51,12 +51,13 @@ NOISE_TYPE_TO_CV_DIR = {
 }
 
 
-def get_fold_paths(cv_root: Path, tau: float, fold_id: int, noise_type: str) -> tuple[Path, Path]:
-    if noise_type == "feature_driven_idn":
+def get_fold_paths(cv_root: Path, tau: float, fold_id: int) -> tuple[Path, Path]:
+    # Returns paths to train_noisy and test_clean CSVs for one fold
+    if "feature_driven" in str(cv_root):
         tau_folder = "clean" if tau == 0.0 else f"idn_feature_tau{int(tau * 100):02d}"
-    elif noise_type == "standardized_idn":
-        tau_folder = "clean" if tau == 0.0 else f"idn_standardized_tau{int(tau * 100):02d}"
-    else:  # standard_idn
+    elif "standardized" in str(cv_root):
+        tau_folder = "clean" if tau == 0.0 else f"idn_tau{int(tau * 100):02d}"
+    else:
         tau_folder = "clean" if tau == 0.0 else f"idn_tau{int(tau * 100):02d}"
 
     fold_dir    = cv_root / tau_folder / f"fold_{fold_id:02d}"
@@ -91,7 +92,7 @@ def main() -> None:
 
     for tau in tqdm(TAU_VALUES, desc="Tau levels"):
         for fold_id in range(OUTER_FOLDS):
-            train_noisy_path, test_clean_path = get_fold_paths(cv_root, tau, fold_id, NOISE_TYPE)
+            train_noisy_path, test_clean_path = get_fold_paths(cv_root, tau, fold_id)
 
             # Skip if fold data does not exist yet
             if not train_noisy_path.exists() or not test_clean_path.exists():
