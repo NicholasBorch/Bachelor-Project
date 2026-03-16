@@ -25,7 +25,7 @@ warnings.filterwarnings("ignore")
 
 # ── paths ──────────────────────────────────────────────────────────────────────
 SCRIPT_DIR   = Path(__file__).resolve().parent
-RESULTS_ROOT = SCRIPT_DIR / ".." / ".." / "results" / "HAM10000" / "baseline" / "feature_driven_idn"
+RESULTS_ROOT = SCRIPT_DIR / ".." / ".." / "results" / "HAM10000" / "baseline" / "standardized_idn"
 RESULTS_ROOT = RESULTS_ROOT.resolve()
 PLOT_DIR     = RESULTS_ROOT / "plots"
 PLOT_DIR.mkdir(parents=True, exist_ok=True)
