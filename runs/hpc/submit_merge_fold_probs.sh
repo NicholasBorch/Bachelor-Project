@@ -4,9 +4,8 @@
 
 set -euo pipefail
 cd $HOME/projects/Bachelor-Project
-source .venv/bin/activate
 mkdir -p logs
-export PYTHONUNBUFFERED=1
+VENV="$HOME/projects/Bachelor-Project/.venv/bin/activate"
 
 bsub \
     -J "mergeprobs" \
@@ -16,4 +15,4 @@ bsub \
     -W 0:10 \
     -oo logs/mergeprobs.out \
     -eo logs/mergeprobs.err \
-    python -m src.utils.merge_fold_probs
+    bash -c "source ${VENV} && python -m src.utils.merge_fold_probs"

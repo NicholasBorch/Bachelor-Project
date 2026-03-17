@@ -13,9 +13,8 @@
 
 set -euo pipefail
 cd $HOME/projects/Bachelor-Project
-source .venv/bin/activate
 mkdir -p logs
-export PYTHONUNBUFFERED=1
+VENV="$HOME/projects/Bachelor-Project/.venv/bin/activate"
 
 echo "============================================"
 echo "  Noise Preparation — 10-Fold CV"
@@ -36,7 +35,7 @@ for FOLD in $(seq 0 9); do
         -W 0:30 \
         -oo logs/cvstd_${FOLD}.out \
         -eo logs/cvstd_${FOLD}.err \
-        python -m src.utils.prepare_classification_cv --fold $FOLD --method standard \
+        bash -c "source ${VENV} && python -m src.utils.prepare_classification_cv --fold ${FOLD} --method standard" \
         | awk '{print $2}' | tr -d '<>')
     STD_JOBIDS+=($JOBID)
     echo "  Fold $FOLD → job $JOBID"
@@ -57,7 +56,7 @@ for FOLD in $(seq 0 9); do
         -W 0:30 \
         -oo logs/cvnorm_${FOLD}.out \
         -eo logs/cvnorm_${FOLD}.err \
-        python -m src.utils.prepare_classification_cv --fold $FOLD --method normalized \
+        bash -c "source ${VENV} && python -m src.utils.prepare_classification_cv --fold ${FOLD} --method normalized" \
         | awk '{print $2}' | tr -d '<>')
     NORM_JOBIDS+=($JOBID)
     echo "  Fold $FOLD → job $JOBID"
@@ -79,7 +78,7 @@ for FOLD in $(seq 0 9); do
         -W 1:00 \
         -oo logs/foldprobs_${FOLD}.out \
         -eo logs/foldprobs_${FOLD}.err \
-        python -m src.utils.collect_fold_probs --fold $FOLD \
+        bash -c "source ${VENV} && python -m src.utils.collect_fold_probs --fold ${FOLD}" \
         | awk '{print $2}' | tr -d '<>')
     PROBS_JOBIDS+=($JOBID)
     echo "  Fold $FOLD → job $JOBID"
@@ -101,7 +100,7 @@ MERGE_JOB=$(bsub \
     -W 0:10 \
     -oo logs/mergeprobs.out \
     -eo logs/mergeprobs.err \
-    python -m src.utils.merge_fold_probs \
+    bash -c "source ${VENV} && python -m src.utils.merge_fold_probs" \
     | awk '{print $2}' | tr -d '<>')
 echo "  Merge job → $MERGE_JOB"
 
@@ -121,7 +120,7 @@ for FOLD in $(seq 0 9); do
         -W 0:20 \
         -oo logs/cvfd_${FOLD}.out \
         -eo logs/cvfd_${FOLD}.err \
-        python -m src.utils.prepare_classification_cv_feature_driven --fold $FOLD \
+        bash -c "source ${VENV} && python -m src.utils.prepare_classification_cv_feature_driven --fold ${FOLD}" \
         | awk '{print $2}' | tr -d '<>')
     FD_JOBIDS+=($JOBID)
     echo "  Fold $FOLD → job $JOBID"

@@ -4,10 +4,9 @@
 
 set -euo pipefail
 cd $HOME/projects/Bachelor-Project
-source .venv/bin/activate
 mkdir -p logs
 mkdir -p data/processed/HAM10000/fold_probs
-export PYTHONUNBUFFERED=1
+VENV="$HOME/projects/Bachelor-Project/.venv/bin/activate"
 
 FOLD=${1:?Usage: bash submit_fold_probs.sh <fold>}
 
@@ -21,4 +20,4 @@ bsub \
     -W 1:00 \
     -oo logs/foldprobs_${FOLD}.out \
     -eo logs/foldprobs_${FOLD}.err \
-    python -m src.utils.collect_fold_probs --fold $FOLD
+    bash -c "source ${VENV} && python -m src.utils.collect_fold_probs --fold ${FOLD}"

@@ -4,9 +4,8 @@
 
 set -euo pipefail
 cd $HOME/projects/Bachelor-Project
-source .venv/bin/activate
 mkdir -p logs
-export PYTHONUNBUFFERED=1
+VENV="$HOME/projects/Bachelor-Project/.venv/bin/activate"
 
 FOLD=${1:?Usage: bash submit_standard_cv.sh <fold>}
 
@@ -20,4 +19,4 @@ bsub \
     -W 0:30 \
     -oo logs/cvstd_${FOLD}.out \
     -eo logs/cvstd_${FOLD}.err \
-    python -m src.utils.prepare_classification_cv --fold $FOLD --method standard
+    bash -c "source ${VENV} && python -m src.utils.prepare_classification_cv --fold ${FOLD} --method standard"
