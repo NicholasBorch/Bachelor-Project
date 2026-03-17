@@ -4,7 +4,7 @@
 SEED = 10
 
 # Cross-validation
-OUTER_FOLDS = 5
+FOLDS = 10
 
 # Noise injection
 NOISE_RATES = [0.0, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30]
