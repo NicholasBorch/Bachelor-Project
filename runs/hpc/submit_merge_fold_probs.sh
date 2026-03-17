@@ -6,7 +6,7 @@
 #BSUB -q hpc
 #BSUB -n 1
 #BSUB -R "rusage[mem=8GB]"
-#BSUB -M 10GB
+#BSUB -M 9GB
 #BSUB -W 0:10
 #BSUB -o logs/fold_probs_merge_%J.out
 #BSUB -e logs/fold_probs_merge_%J.err

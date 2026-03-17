@@ -7,7 +7,7 @@
 #BSUB -n 4
 #BSUB -R "span[hosts=1]"
 #BSUB -R "rusage[mem=8GB]"
-#BSUB -M 10GB
+#BSUB -M 9GB
 #BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 0:20
 #BSUB -o logs/cv_feature_driven_%J_%I.out

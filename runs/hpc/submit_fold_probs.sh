@@ -5,7 +5,7 @@
 #BSUB -n 4
 #BSUB -R "span[hosts=1]"
 #BSUB -R "rusage[mem=16GB]"
-#BSUB -M 18GB
+#BSUB -M 16GB
 #BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 1:00
 #BSUB -o logs/fold_probs_%J_%I.out
