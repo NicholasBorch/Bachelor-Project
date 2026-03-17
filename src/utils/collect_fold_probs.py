@@ -35,7 +35,7 @@ from src.classification.train import (
 )
 from configs.classification_default import (
     SEED,
-    OUTER_FOLDS,
+    FOLDS,
     IMAGE_SIZE,
     BATCH_SIZE,
     NUM_WORKERS,
@@ -65,7 +65,7 @@ def collect_probs_for_fold(
     num_classes = len(c2i)
 
     # Same fold split used everywhere — guarantees leakage-free prob collection
-    df_folds = make_folds_lesion_stratified(df, n_splits=OUTER_FOLDS, seed=SEED)
+    df_folds = make_folds_lesion_stratified(df, n_splits=FOLDS, seed=SEED)
 
     train_df = (
         df_folds[df_folds["fold"] != fold_id]
@@ -142,8 +142,8 @@ def main() -> None:
                         help="Fold index to hold out (0-indexed)")
     args = parser.parse_args()
 
-    if not (0 <= args.fold < OUTER_FOLDS):
-        raise ValueError(f"--fold must be in [0, {OUTER_FOLDS - 1}], got {args.fold}")
+    if not (0 <= args.fold < FOLDS):
+        raise ValueError(f"--fold must be in [0, {FOLDS - 1}], got {args.fold}")
 
     root       = project_root()
     ham_one    = root / "data" / "processed" / "HAM10000" / "one_image_per_lesion"
@@ -152,7 +152,7 @@ def main() -> None:
     out_dir    = root / "data" / "processed" / "HAM10000" / "fold_probs"
 
     print(f"=== Fold Probability Collection — Fold {args.fold} ===")
-    print(f"SEED={SEED} | OUTER_FOLDS={OUTER_FOLDS} | EPOCHS={FOLD_PROB_EPOCHS}")
+    print(f"SEED={SEED} | FOLDS={FOLDS} | EPOCHS={FOLD_PROB_EPOCHS}")
 
     df = pd.read_csv(meta_path)
     df["image_id"]  = df["image_id"].astype(str)
