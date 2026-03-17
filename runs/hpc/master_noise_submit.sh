@@ -1,15 +1,5 @@
 #!/bin/bash
 # runs/hpc/master_noise_submit.sh
-#
-# Submits the full noise preparation pipeline.
-# Run once from repo root: bash runs/hpc/master_noise_submit.sh
-#
-# Steps:
-#   1a. Standard IDN       — 10 jobs, all submitted immediately
-#   1b. Normalised IDN     — 10 jobs, all submitted immediately (parallel with 1a)
-#   2.  Fold prob collect  — 10 jobs, all submitted immediately (parallel with 1a/1b)
-#   3.  Merge fold probs   — 1 job, waits for all of step 2
-#   4.  Feature-driven IDN — 10 jobs, all submitted once merge completes
 
 set -euo pipefail
 cd $HOME/projects/Bachelor-Project
@@ -24,11 +14,11 @@ echo ""
 echo "Step 1a: Standard IDN (10 folds)..."
 STD_JOBIDS=()
 for FOLD in $(seq 0 9); do
-    JOBID=$(FOLD=$FOLD bsub \
-        -J "cvstd${FOLD}" \
-        -oo logs/cvstd_${FOLD}.out \
-        -eo logs/cvstd_${FOLD}.err \
-        < runs/hpc/submit_standard_cv.sh \
+    JOBID=$(sed "s/--fold \$FOLD/--fold ${FOLD}/" runs/hpc/submit_standard_cv.sh \
+        | bsub \
+            -J "cvstd${FOLD}" \
+            -oo logs/cvstd_${FOLD}.out \
+            -eo logs/cvstd_${FOLD}.err \
         | awk '{print $2}' | tr -d '<>')
     STD_JOBIDS+=($JOBID)
     echo "  Fold $FOLD → job $JOBID"
@@ -39,11 +29,11 @@ echo ""
 echo "Step 1b: Normalised IDN (10 folds)..."
 NORM_JOBIDS=()
 for FOLD in $(seq 0 9); do
-    JOBID=$(FOLD=$FOLD bsub \
-        -J "cvnorm${FOLD}" \
-        -oo logs/cvnorm_${FOLD}.out \
-        -eo logs/cvnorm_${FOLD}.err \
-        < runs/hpc/submit_normalized_cv.sh \
+    JOBID=$(sed "s/--fold \$FOLD/--fold ${FOLD}/" runs/hpc/submit_normalized_cv.sh \
+        | bsub \
+            -J "cvnorm${FOLD}" \
+            -oo logs/cvnorm_${FOLD}.out \
+            -eo logs/cvnorm_${FOLD}.err \
         | awk '{print $2}' | tr -d '<>')
     NORM_JOBIDS+=($JOBID)
     echo "  Fold $FOLD → job $JOBID"
@@ -54,11 +44,11 @@ echo ""
 echo "Step 2: Fold prob collection (10 folds)..."
 PROBS_JOBIDS=()
 for FOLD in $(seq 0 9); do
-    JOBID=$(FOLD=$FOLD bsub \
-        -J "foldprobs${FOLD}" \
-        -oo logs/foldprobs_${FOLD}.out \
-        -eo logs/foldprobs_${FOLD}.err \
-        < runs/hpc/submit_fold_probs.sh \
+    JOBID=$(sed "s/--fold \$FOLD/--fold ${FOLD}/" runs/hpc/submit_fold_probs.sh \
+        | bsub \
+            -J "foldprobs${FOLD}" \
+            -oo logs/foldprobs_${FOLD}.out \
+            -eo logs/foldprobs_${FOLD}.err \
         | awk '{print $2}' | tr -d '<>')
     PROBS_JOBIDS+=($JOBID)
     echo "  Fold $FOLD → job $JOBID"
@@ -85,12 +75,12 @@ echo ""
 echo "Step 4: Feature-driven IDN (10 folds, waits for merge)..."
 FD_JOBIDS=()
 for FOLD in $(seq 0 9); do
-    JOBID=$(FOLD=$FOLD bsub \
-        -J "cvfd${FOLD}" \
-        -w "done(${MERGE_JOB})" \
-        -oo logs/cvfd_${FOLD}.out \
-        -eo logs/cvfd_${FOLD}.err \
-        < runs/hpc/submit_feature_driven_cv.sh \
+    JOBID=$(sed "s/--fold \$FOLD/--fold ${FOLD}/" runs/hpc/submit_feature_driven_cv.sh \
+        | bsub \
+            -J "cvfd${FOLD}" \
+            -w "done(${MERGE_JOB})" \
+            -oo logs/cvfd_${FOLD}.out \
+            -eo logs/cvfd_${FOLD}.err \
         | awk '{print $2}' | tr -d '<>')
     FD_JOBIDS+=($JOBID)
     echo "  Fold $FOLD → job $JOBID"
