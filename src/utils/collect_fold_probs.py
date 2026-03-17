@@ -1,30 +1,14 @@
-# src/utils/collect_oof_probs.py
+# src/utils/collect_fold_probs.py
 #
-# Collects out-of-fold (OOF) softmax probabilities for ONE fold of a 5-fold split.
-# Designed to run as a parallel HPC job — submit 5 jobs each with --fold 0..4.
+# Collects fold softmax probabilities for ONE fold of a 10-fold split.
+# Designed to run as a parallel HPC job — submit 10 jobs each with --fold 0..9.
 #
-# Design rationale:
-#   Standard IDN uses random projections to determine flip targets.
-#   On imbalanced datasets like HAM10000, class size distorts the projection space
-#   and produces near-deterministic, tau-invariant flip targets.
-#   Feature-driven IDN instead uses per-sample softmax probabilities from a model
-#   that has never seen that sample — grounding flip targets in visual similarity.
-#
-#   The OOF design ensures leakage-free probability collection:
-#     - For fold F: train ResNet-18 on all folds except F
-#     - Collect softmax probs on fold F (model never saw these samples)
-#     - After all 5 jobs complete, merge_oof_probs.py assembles the full array
-#
-#   IMPORTANT: uses the same fold split (seed + function) as the evaluation CV,
-#   so every training sample in eval fold F has probs from a model trained
-#   without it — the leakage guarantee holds end-to-end.
+# For fold F: trains ResNet-18 on all folds except F, then collects softmax
+# probabilities on fold F (model never saw these samples during training).
+# After all 10 jobs complete, merge_fold_probs.py assembles the full array.
 #
 # Usage (from repo root):
-#   python -m src.utils.collect_oof_probs --fold 0
-#
-# Output:
-#   data/processed/HAM10000/oof_probs/fold_00_probs.npy    shape (N_fold, C)
-#   data/processed/HAM10000/oof_probs/fold_00_indices.npy  original df indices
+#   python -m src.utils.collect_fold_probs --fold 0
 
 from __future__ import annotations
 
@@ -41,7 +25,7 @@ from torch.utils.data import DataLoader
 from src.common.io import project_root, class_mapping
 from src.common.seed import seed_everything
 from src.classification.dataset import HamTensorDataset
-from src.classification.folds import make_outer_folds_lesion_stratified
+from src.classification.folds import make_folds_lesion_stratified
 from src.classification.models import build_resnet
 from src.classification.train import (
     get_transforms,
@@ -58,10 +42,10 @@ from configs.classification_default import (
     PIN_MEMORY,
 )
 
-# ResNet-18 is used here (lighter than ResNet-50) — its role is to capture
-# visual confusion patterns, not to achieve peak classification accuracy
-OOF_EPOCHS = 30
-OOF_LR     = 1e-4
+# ResNet-18 is sufficient here — its role is to capture visual confusion
+# patterns for noise generation, not to achieve peak classification accuracy
+FOLD_PROB_EPOCHS = 30
+FOLD_PROB_LR     = 1e-4
 
 
 def collect_probs_for_fold(
@@ -80,24 +64,20 @@ def collect_probs_for_fold(
     c2i, _ = class_mapping(df["dx"].tolist())
     num_classes = len(c2i)
 
-    # ── Build the same fold split used everywhere in the pipeline ─────────
-    # Using identical seed + function guarantees the OOF split matches the
-    # evaluation CV split, so leakage cannot occur between the two pipelines.
-    df_folds = make_outer_folds_lesion_stratified(df, n_splits=OUTER_FOLDS, seed=SEED)
+    # Same fold split used everywhere — guarantees leakage-free prob collection
+    df_folds = make_folds_lesion_stratified(df, n_splits=OUTER_FOLDS, seed=SEED)
 
-    # Training data: all folds except fold_id
     train_df = (
-        df_folds[df_folds["outer_fold"] != fold_id]
+        df_folds[df_folds["fold"] != fold_id]
         .copy()
         .reset_index(drop=True)
     )
 
-    # Validation data: fold_id only — model never sees these during training
-    val_mask    = df_folds["outer_fold"] == fold_id
+    val_mask    = df_folds["fold"] == fold_id
     val_df      = df_folds[val_mask].copy().reset_index(drop=True)
-    val_indices = df_folds[val_mask].index.tolist()  # positions in original df
+    val_indices = df_folds[val_mask].index.tolist()
 
-    print(f"\nOOF collection | fold {fold_id} | "
+    print(f"\nFold prob collection | fold {fold_id} | "
           f"train={len(train_df)} | val={len(val_df)} | device={device}")
 
     # ── Train ResNet-18 with class balancing ──────────────────────────────
@@ -116,15 +96,15 @@ def collect_probs_for_fold(
     criterion = torch.nn.CrossEntropyLoss(
         weight=compute_class_weights(train_labels, num_classes, device)
     )
-    optimiser = torch.optim.Adam(model.parameters(), lr=OOF_LR)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimiser, T_max=OOF_EPOCHS)
+    optimiser = torch.optim.Adam(model.parameters(), lr=FOLD_PROB_LR)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimiser, T_max=FOLD_PROB_EPOCHS)
 
     # Fixed epoch count — no early stopping so that the val split has zero
-    # influence on training. Inner test split is purely for prob collection.
-    for epoch in range(OOF_EPOCHS):
+    # influence on training
+    for epoch in range(FOLD_PROB_EPOCHS):
         loss = train_one_epoch(model, train_loader, criterion, optimiser, device)
         scheduler.step()
-        print(f"  Epoch {epoch+1:02d}/{OOF_EPOCHS} | train_loss={loss:.4f}")
+        print(f"  Epoch {epoch+1:02d}/{FOLD_PROB_EPOCHS} | train_loss={loss:.4f}")
 
     # ── Collect softmax probabilities on the held-out fold ────────────────
     model.eval()
@@ -143,7 +123,6 @@ def collect_probs_for_fold(
             for x, _, _ in val_loader
         ], axis=0)  # shape: (N_fold, C)
 
-    # ── Save probs and their original indices ─────────────────────────────
     out_dir.mkdir(parents=True, exist_ok=True)
     probs_path   = out_dir / f"fold_{fold_id:02d}_probs.npy"
     indices_path = out_dir / f"fold_{fold_id:02d}_indices.npy"
@@ -151,34 +130,34 @@ def collect_probs_for_fold(
     np.save(probs_path,   probs)
     np.save(indices_path, np.array(val_indices, dtype=np.int64))
 
-    print(f"\nSaved OOF probs  : {probs_path}  shape={probs.shape}")
-    print(f"Saved OOF indices: {indices_path} n={len(val_indices)}")
+    print(f"\nSaved fold probs  : {probs_path}  shape={probs.shape}")
+    print(f"Saved fold indices: {indices_path} n={len(val_indices)}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Collect OOF softmax probs for one fold (run 5 in parallel on HPC)."
+        description="Collect fold softmax probs for one fold (run in parallel on HPC)."
     )
     parser.add_argument("--fold", type=int, required=True,
-                        help="Fold index to hold out (0-indexed, 0 to OUTER_FOLDS-1)")
+                        help="Fold index to hold out (0-indexed)")
     args = parser.parse_args()
+
+    if not (0 <= args.fold < OUTER_FOLDS):
+        raise ValueError(f"--fold must be in [0, {OUTER_FOLDS - 1}], got {args.fold}")
 
     root       = project_root()
     ham_one    = root / "data" / "processed" / "HAM10000" / "one_image_per_lesion"
     meta_path  = ham_one / "HAM10000_metadata_one_per_lesion.csv"
     images_dir = ham_one / "images"
-    out_dir    = root / "data" / "processed" / "HAM10000" / "oof_probs"
+    out_dir    = root / "data" / "processed" / "HAM10000" / "fold_probs"
 
-    print(f"=== OOF Probability Collection — Fold {args.fold} ===")
-    print(f"SEED={SEED} | OUTER_FOLDS={OUTER_FOLDS} | OOF_EPOCHS={OOF_EPOCHS}")
+    print(f"=== Fold Probability Collection — Fold {args.fold} ===")
+    print(f"SEED={SEED} | OUTER_FOLDS={OUTER_FOLDS} | EPOCHS={FOLD_PROB_EPOCHS}")
 
     df = pd.read_csv(meta_path)
     df["image_id"]  = df["image_id"].astype(str)
     df["lesion_id"] = df["lesion_id"].astype(str)
     df["dx"]        = df["dx"].astype(str)
-
-    if not (0 <= args.fold < OUTER_FOLDS):
-        raise ValueError(f"--fold must be in [0, {OUTER_FOLDS - 1}], got {args.fold}")
 
     collect_probs_for_fold(
         fold_id=args.fold,
