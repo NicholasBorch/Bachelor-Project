@@ -1,8 +1,8 @@
 #!/bin/bash
-#BSUB -q hpc
+#BSUB -q gpuv100
 #BSUB -n 1
 #BSUB -R "rusage[mem=8000]"
-#BSUB -W 0:10
+#BSUB -W 05:00
 
 set -euo pipefail
 cd ~/projects/Bachelor-Project

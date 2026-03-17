@@ -4,7 +4,7 @@
 #BSUB -R "span[hosts=1]"
 #BSUB -R "rusage[mem=16000]"
 #BSUB -gpu "num=1"
-#BSUB -W 0:20
+#BSUB -W 05:00
 
 set -euo pipefail
 cd ~/projects/Bachelor-Project
