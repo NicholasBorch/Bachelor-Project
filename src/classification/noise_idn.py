@@ -34,19 +34,16 @@ from torchvision import transforms
 
 from src.common.io import class_mapping
 from src.classification.dataset import HamTensorDataset
-from src.classification.folds import make_outer_folds_lesion_stratified
 
 
 # ── Shared dataclasses ────────────────────────────────────────────────────────
 
 @dataclass
 class NoiseReport:
-    """Summary statistics for one noise injection run."""
-    outer_fold:         int
     seed:               int
     tau:                float
     norm_std:           float
-    normalize:          bool          # whether ImageNet normalization was applied
+    normalize:          bool
     num_classes:        int
     feature_size:       int
     n_train:            int
@@ -58,14 +55,6 @@ class NoiseReport:
     flip_rate_median:   float
     flip_rate_max:      float
 
-
-@dataclass
-class FoldOutputs:
-    """All artifacts produced for one outer CV fold at one tau level."""
-    train_clean: pd.DataFrame
-    train_noisy: pd.DataFrame
-    test_clean:  pd.DataFrame
-    report:      NoiseReport
 
 
 # ── Core noise generation ─────────────────────────────────────────────────────
@@ -112,7 +101,7 @@ def generate_instance_dependent_noisy_labels(
         df_out["dx_clean"] = df_out["dx"]
         df_out["dx_noisy"] = df_out["dx"]
         return df_out, NoiseReport(
-            outer_fold=-1, seed=int(seed), tau=0.0, norm_std=float(norm_std),
+            seed=int(seed), tau=0.0, norm_std=float(norm_std),
             normalize=normalize, num_classes=int(num_classes),
             feature_size=int(feature_size), n_train=int(n), n_flipped=0,
             class_counts_clean=df_out["dx_clean"].value_counts().to_dict(),
@@ -211,7 +200,6 @@ def generate_instance_dependent_noisy_labels(
     df_out["dx_noisy"] = [i2c[int(i)] for i in new_label_idx]
 
     return df_out, NoiseReport(
-        outer_fold=-1,
         seed=int(seed),
         tau=float(tau),
         norm_std=float(norm_std),
