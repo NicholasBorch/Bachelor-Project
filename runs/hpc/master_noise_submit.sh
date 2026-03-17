@@ -1,0 +1,147 @@
+#!/bin/bash
+# runs/hpc/master_noise_submit.sh
+#
+# Submits the full noise preparation pipeline.
+# Run once from repo root: bash runs/hpc/master_noise_submit.sh
+#
+# Steps:
+#   1a. Standard IDN       — 10 jobs, all submitted immediately
+#   1b. Normalised IDN     — 10 jobs, all submitted immediately (parallel with 1a)
+#   2.  Fold prob collect  — 10 jobs, all submitted immediately (parallel with 1a/1b)
+#   3.  Merge fold probs   — 1 job, waits for all of step 2
+#   4.  Feature-driven IDN — 10 jobs, all submitted once merge completes
+
+set -euo pipefail
+cd $HOME/projects/Bachelor-Project
+source .venv/bin/activate
+mkdir -p logs
+export PYTHONUNBUFFERED=1
+
+echo "============================================"
+echo "  Noise Preparation — 10-Fold CV"
+echo "============================================"
+
+# ── Step 1a: Standard IDN ─────────────────────────────────────────────────────
+echo ""
+echo "Step 1a: Standard IDN (10 folds)..."
+STD_JOBIDS=()
+for FOLD in $(seq 0 9); do
+    JOBID=$(bsub \
+        -J "cvstd${FOLD}" \
+        -q gpuv100 \
+        -n 8 \
+        -R "span[hosts=1]" \
+        -R "rusage[mem=16000]" \
+        -gpu "num=1" \
+        -W 0:30 \
+        -oo logs/cvstd_${FOLD}.out \
+        -eo logs/cvstd_${FOLD}.err \
+        python -m src.utils.prepare_classification_cv --fold $FOLD --method standard \
+        | awk '{print $2}' | tr -d '<>')
+    STD_JOBIDS+=($JOBID)
+    echo "  Fold $FOLD → job $JOBID"
+done
+
+# ── Step 1b: Normalised IDN ───────────────────────────────────────────────────
+echo ""
+echo "Step 1b: Normalised IDN (10 folds)..."
+NORM_JOBIDS=()
+for FOLD in $(seq 0 9); do
+    JOBID=$(bsub \
+        -J "cvnorm${FOLD}" \
+        -q gpuv100 \
+        -n 8 \
+        -R "span[hosts=1]" \
+        -R "rusage[mem=16000]" \
+        -gpu "num=1" \
+        -W 0:30 \
+        -oo logs/cvnorm_${FOLD}.out \
+        -eo logs/cvnorm_${FOLD}.err \
+        python -m src.utils.prepare_classification_cv --fold $FOLD --method normalized \
+        | awk '{print $2}' | tr -d '<>')
+    NORM_JOBIDS+=($JOBID)
+    echo "  Fold $FOLD → job $JOBID"
+done
+
+# ── Step 2: Fold prob collection ──────────────────────────────────────────────
+echo ""
+echo "Step 2: Fold prob collection (10 folds)..."
+mkdir -p data/processed/HAM10000/fold_probs
+PROBS_JOBIDS=()
+for FOLD in $(seq 0 9); do
+    JOBID=$(bsub \
+        -J "foldprobs${FOLD}" \
+        -q gpuv100 \
+        -n 8 \
+        -R "span[hosts=1]" \
+        -R "rusage[mem=16000]" \
+        -gpu "num=1" \
+        -W 1:00 \
+        -oo logs/foldprobs_${FOLD}.out \
+        -eo logs/foldprobs_${FOLD}.err \
+        python -m src.utils.collect_fold_probs --fold $FOLD \
+        | awk '{print $2}' | tr -d '<>')
+    PROBS_JOBIDS+=($JOBID)
+    echo "  Fold $FOLD → job $JOBID"
+done
+
+# ── Step 3: Merge — waits for ALL 10 fold prob jobs ──────────────────────────
+echo ""
+echo "Step 3: Merge fold probs (waits for all fold prob jobs)..."
+
+MERGE_DEPENDS=$(printf "done(%s)&&" "${PROBS_JOBIDS[@]}")
+MERGE_DEPENDS=${MERGE_DEPENDS%&&}
+
+MERGE_JOB=$(bsub \
+    -J "mergeprobs" \
+    -w "$MERGE_DEPENDS" \
+    -q hpc \
+    -n 1 \
+    -R "rusage[mem=8000]" \
+    -W 0:10 \
+    -oo logs/mergeprobs.out \
+    -eo logs/mergeprobs.err \
+    python -m src.utils.merge_fold_probs \
+    | awk '{print $2}' | tr -d '<>')
+echo "  Merge job → $MERGE_JOB"
+
+# ── Step 4: Feature-driven IDN — waits for merge ─────────────────────────────
+echo ""
+echo "Step 4: Feature-driven IDN (10 folds, waits for merge)..."
+FD_JOBIDS=()
+for FOLD in $(seq 0 9); do
+    JOBID=$(bsub \
+        -J "cvfd${FOLD}" \
+        -w "done(${MERGE_JOB})" \
+        -q gpuv100 \
+        -n 8 \
+        -R "span[hosts=1]" \
+        -R "rusage[mem=16000]" \
+        -gpu "num=1" \
+        -W 0:20 \
+        -oo logs/cvfd_${FOLD}.out \
+        -eo logs/cvfd_${FOLD}.err \
+        python -m src.utils.prepare_classification_cv_feature_driven --fold $FOLD \
+        | awk '{print $2}' | tr -d '<>')
+    FD_JOBIDS+=($JOBID)
+    echo "  Fold $FOLD → job $JOBID"
+done
+
+# ── Summary ───────────────────────────────────────────────────────────────────
+echo ""
+echo "============================================"
+echo "  All jobs submitted. Monitor with: bjobs"
+echo "============================================"
+echo "  Standard IDN jobs    : ${STD_JOBIDS[@]}"
+echo "  Normalised IDN jobs  : ${NORM_JOBIDS[@]}"
+echo "  Fold prob jobs       : ${PROBS_JOBIDS[@]}"
+echo "  Merge job            : ${MERGE_JOB}"
+echo "  Feature-driven jobs  : ${FD_JOBIDS[@]}"
+echo ""
+echo "  Logs: logs/cvstd_*.out"
+echo "        logs/cvnorm_*.out"
+echo "        logs/foldprobs_*.out"
+echo "        logs/mergeprobs.out"
+echo "        logs/cvfd_*.out"
+echo ""
+echo "  Expected total wall time: ~80 minutes"
