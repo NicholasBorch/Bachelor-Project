@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import inf
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
 import numpy as np
 import pandas as pd
@@ -36,10 +36,11 @@ from src.common.io import class_mapping
 from src.classification.dataset import HamTensorDataset
 
 
-# ── Shared dataclasses ────────────────────────────────────────────────────────
+# ── Shared dataclass ──────────────────────────────────────────────────────────
 
 @dataclass
 class NoiseReport:
+    """Summary statistics for one noise injection run."""
     seed:               int
     tau:                float
     norm_std:           float
@@ -54,7 +55,6 @@ class NoiseReport:
     flip_rate_min:      float
     flip_rate_median:   float
     flip_rate_max:      float
-
 
 
 # ── Core noise generation ─────────────────────────────────────────────────────
@@ -90,10 +90,10 @@ def generate_instance_dependent_noisy_labels(
     df["lesion_id"] = df["lesion_id"].astype(str)
     df["dx"]        = df["dx"].astype(str)
 
-    c2i, i2c    = class_mapping(df["dx"].tolist())
-    num_classes = len(c2i)
+    c2i, i2c     = class_mapping(df["dx"].tolist())
+    num_classes  = len(c2i)
     feature_size = 3 * image_size * image_size
-    n = len(df)
+    n            = len(df)
 
     # ── Short-circuit for clean baseline — no flipping occurs ─────────────
     if tau == 0.0:
@@ -118,9 +118,6 @@ def generate_instance_dependent_noisy_labels(
         transforms.ToTensor(),  # → [0, 1]
     ]
     if normalize:
-        # Centres pixel values around zero, ~half negative.
-        # Introduces genuine cancellation in x @ W_y so that score ordering
-        # becomes sensitive to image content rather than sign structure of W.
         tfm_steps.append(transforms.Normalize(
             mean=[0.485, 0.456, 0.406],
             std=[0.229, 0.224, 0.225],
@@ -163,27 +160,21 @@ def generate_instance_dependent_noisy_labels(
         x = x.to(device)
         y = y.to(device).long()
 
-        # Project pixel vectors through class-conditional W (Xia et al. Eq. 1)
-        # x_flat: (B, d)  W_y: (B, d, C)  A: (B, C)
         x_flat = x.view(b, -1)
-        W_y = W[y]
-        A = torch.bmm(x_flat.unsqueeze(1), W_y).squeeze(1)
+        W_y    = W[y]
+        A      = torch.bmm(x_flat.unsqueeze(1), W_y).squeeze(1)
 
-        # Mask true class so it cannot be sampled as its own flip target
         A[torch.arange(b, device=device), y] = -inf
 
-        # Scale softmax probs by per-instance flip rate; restore true class mass
         q = torch.from_numpy(flip_rate[cursor:cursor + b]).to(device).view(-1, 1)
         P = q * F.softmax(A, dim=1)
         P[torch.arange(b, device=device), y] += (1.0 - q.squeeze(1))
 
-        # Sample noisy labels from the per-instance transition distribution
         sampled     = torch.multinomial(P, num_samples=1).squeeze(1)
         sampled_cpu = sampled.cpu().numpy().astype(np.int64)
         y_cpu       = y.cpu().numpy().astype(np.int64)
         new_label_idx[cursor:cursor + b] = sampled_cpu
 
-        # Track flips for the noise report confusion matrix
         for yi, ytilde in zip(y_cpu, sampled_cpu):
             if ytilde == yi:
                 continue
