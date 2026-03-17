@@ -65,7 +65,7 @@ def generate_feature_driven_noisy_labels(
         df_out["dx_clean"] = df_out["dx"]
         df_out["dx_noisy"] = df_out["dx"]
         return df_out, NoiseReport(
-            outer_fold=-1, seed=int(seed), tau=0.0, norm_std=float(norm_std),
+            seed=int(seed), tau=0.0, norm_std=float(norm_std),
             normalize=False,  # not applicable for feature-driven
             num_classes=int(num_classes), feature_size=0,
             n_train=int(n), n_flipped=0,
@@ -125,7 +125,6 @@ def generate_feature_driven_noisy_labels(
     df_out["dx_noisy"] = [i2c[int(i)] for i in new_label_idx]
 
     return df_out, NoiseReport(
-        outer_fold=-1,
         seed=int(seed),
         tau=float(tau),
         norm_std=float(norm_std),

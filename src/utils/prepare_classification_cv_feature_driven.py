@@ -95,7 +95,6 @@ def process_fold(
             oof_probs=oof_train_probs.copy(),
             norm_std=NORM_STD,
         )
-        report.outer_fold = int(fold_id)
 
         # Build clean and noisy training DataFrames
         keep_cols = ["image_id", "lesion_id", "dx", "dx_clean", "dx_noisy"]
