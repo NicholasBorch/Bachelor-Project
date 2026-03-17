@@ -11,9 +11,11 @@
 #   3.  Merge fold probs   — 1 job, waits for all of step 2
 #   4.  Feature-driven IDN — 10 jobs, max 5 at once, waits for step 3
 
-set -e
+set -euo pipefail
 cd $HOME/projects/Bachelor-Project
+source .venv/bin/activate
 mkdir -p logs
+export PYTHONUNBUFFERED=1
 
 echo "============================================"
 echo "  Noise Preparation — 10-Fold CV"
@@ -28,9 +30,14 @@ for FOLD in $(seq 0 9); do
     if [ $RUNNING -lt 5 ]; then
         JOBID=$(bsub \
             -J "cvstd${FOLD}" \
-            -q gpuv100 -n 4 -R "span[hosts=1]" -R "rusage[mem=8GB]" \
-            -gpu "num=1:mode=exclusive_process" -W 0:30 \
-            -o logs/cvstd_${FOLD}.out -e logs/cvstd_${FOLD}.err \
+            -q gpuv100 \
+            -n 8 \
+            -R "span[hosts=1]" \
+            -R "rusage[mem=16000]" \
+            -gpu "num=1" \
+            -W 0:30 \
+            -oo logs/cvstd_${FOLD}.out \
+            -eo logs/cvstd_${FOLD}.err \
             python -m src.utils.prepare_classification_cv --fold $FOLD --method standard \
             | awk '{print $2}' | tr -d '<>')
     else
@@ -38,9 +45,14 @@ for FOLD in $(seq 0 9); do
         JOBID=$(bsub \
             -J "cvstd${FOLD}" \
             -w "done(${WAIT_ID})" \
-            -q gpuv100 -n 4 -R "span[hosts=1]" -R "rusage[mem=8GB]" \
-            -gpu "num=1:mode=exclusive_process" -W 0:30 \
-            -o logs/cvstd_${FOLD}.out -e logs/cvstd_${FOLD}.err \
+            -q gpuv100 \
+            -n 8 \
+            -R "span[hosts=1]" \
+            -R "rusage[mem=16000]" \
+            -gpu "num=1" \
+            -W 0:30 \
+            -oo logs/cvstd_${FOLD}.out \
+            -eo logs/cvstd_${FOLD}.err \
             python -m src.utils.prepare_classification_cv --fold $FOLD --method standard \
             | awk '{print $2}' | tr -d '<>')
     fi
@@ -58,9 +70,14 @@ for FOLD in $(seq 0 9); do
     if [ $RUNNING -lt 5 ]; then
         JOBID=$(bsub \
             -J "cvnorm${FOLD}" \
-            -q gpuv100 -n 4 -R "span[hosts=1]" -R "rusage[mem=8GB]" \
-            -gpu "num=1:mode=exclusive_process" -W 0:30 \
-            -o logs/cvnorm_${FOLD}.out -e logs/cvnorm_${FOLD}.err \
+            -q gpuv100 \
+            -n 8 \
+            -R "span[hosts=1]" \
+            -R "rusage[mem=16000]" \
+            -gpu "num=1" \
+            -W 0:30 \
+            -oo logs/cvnorm_${FOLD}.out \
+            -eo logs/cvnorm_${FOLD}.err \
             python -m src.utils.prepare_classification_cv --fold $FOLD --method normalized \
             | awk '{print $2}' | tr -d '<>')
     else
@@ -68,9 +85,14 @@ for FOLD in $(seq 0 9); do
         JOBID=$(bsub \
             -J "cvnorm${FOLD}" \
             -w "done(${WAIT_ID})" \
-            -q gpuv100 -n 4 -R "span[hosts=1]" -R "rusage[mem=8GB]" \
-            -gpu "num=1:mode=exclusive_process" -W 0:30 \
-            -o logs/cvnorm_${FOLD}.out -e logs/cvnorm_${FOLD}.err \
+            -q gpuv100 \
+            -n 8 \
+            -R "span[hosts=1]" \
+            -R "rusage[mem=16000]" \
+            -gpu "num=1" \
+            -W 0:30 \
+            -oo logs/cvnorm_${FOLD}.out \
+            -eo logs/cvnorm_${FOLD}.err \
             python -m src.utils.prepare_classification_cv --fold $FOLD --method normalized \
             | awk '{print $2}' | tr -d '<>')
     fi
@@ -89,9 +111,14 @@ for FOLD in $(seq 0 9); do
     if [ $RUNNING -lt 5 ]; then
         JOBID=$(bsub \
             -J "foldprobs${FOLD}" \
-            -q gpuv100 -n 4 -R "span[hosts=1]" -R "rusage[mem=16GB]" \
-            -gpu "num=1:mode=exclusive_process" -W 1:00 \
-            -o logs/foldprobs_${FOLD}.out -e logs/foldprobs_${FOLD}.err \
+            -q gpuv100 \
+            -n 8 \
+            -R "span[hosts=1]" \
+            -R "rusage[mem=16000]" \
+            -gpu "num=1" \
+            -W 1:00 \
+            -oo logs/foldprobs_${FOLD}.out \
+            -eo logs/foldprobs_${FOLD}.err \
             python -m src.utils.collect_fold_probs --fold $FOLD \
             | awk '{print $2}' | tr -d '<>')
     else
@@ -99,9 +126,14 @@ for FOLD in $(seq 0 9); do
         JOBID=$(bsub \
             -J "foldprobs${FOLD}" \
             -w "done(${WAIT_ID})" \
-            -q gpuv100 -n 4 -R "span[hosts=1]" -R "rusage[mem=16GB]" \
-            -gpu "num=1:mode=exclusive_process" -W 1:00 \
-            -o logs/foldprobs_${FOLD}.out -e logs/foldprobs_${FOLD}.err \
+            -q gpuv100 \
+            -n 8 \
+            -R "span[hosts=1]" \
+            -R "rusage[mem=16000]" \
+            -gpu "num=1" \
+            -W 1:00 \
+            -oo logs/foldprobs_${FOLD}.out \
+            -eo logs/foldprobs_${FOLD}.err \
             python -m src.utils.collect_fold_probs --fold $FOLD \
             | awk '{print $2}' | tr -d '<>')
     fi
@@ -114,15 +146,18 @@ done
 echo ""
 echo "Step 3: Merge fold probs (waits for all fold prob jobs)..."
 
-# Build dependency string: done(ID0)&&done(ID1)&&...&&done(ID9)
 MERGE_DEPENDS=$(printf "done(%s)&&" "${PROBS_JOBIDS[@]}")
-MERGE_DEPENDS=${MERGE_DEPENDS%&&}  # strip trailing &&
+MERGE_DEPENDS=${MERGE_DEPENDS%&&}
 
 MERGE_JOB=$(bsub \
     -J "mergeprobs" \
     -w "$MERGE_DEPENDS" \
-    -q hpc -n 1 -R "rusage[mem=8GB]" -W 0:10 \
-    -o logs/mergeprobs.out -e logs/mergeprobs.err \
+    -q hpc \
+    -n 1 \
+    -R "rusage[mem=8000]" \
+    -W 0:10 \
+    -oo logs/mergeprobs.out \
+    -eo logs/mergeprobs.err \
     python -m src.utils.merge_fold_probs \
     | awk '{print $2}' | tr -d '<>')
 echo "  Merge job → $MERGE_JOB"
@@ -137,9 +172,14 @@ for FOLD in $(seq 0 9); do
         JOBID=$(bsub \
             -J "cvfd${FOLD}" \
             -w "done(${MERGE_JOB})" \
-            -q gpuv100 -n 4 -R "span[hosts=1]" -R "rusage[mem=8GB]" \
-            -gpu "num=1:mode=exclusive_process" -W 0:20 \
-            -o logs/cvfd_${FOLD}.out -e logs/cvfd_${FOLD}.err \
+            -q gpuv100 \
+            -n 8 \
+            -R "span[hosts=1]" \
+            -R "rusage[mem=16000]" \
+            -gpu "num=1" \
+            -W 0:20 \
+            -oo logs/cvfd_${FOLD}.out \
+            -eo logs/cvfd_${FOLD}.err \
             python -m src.utils.prepare_classification_cv_feature_driven --fold $FOLD \
             | awk '{print $2}' | tr -d '<>')
     else
@@ -147,9 +187,14 @@ for FOLD in $(seq 0 9); do
         JOBID=$(bsub \
             -J "cvfd${FOLD}" \
             -w "done(${MERGE_JOB})&&done(${WAIT_ID})" \
-            -q gpuv100 -n 4 -R "span[hosts=1]" -R "rusage[mem=8GB]" \
-            -gpu "num=1:mode=exclusive_process" -W 0:20 \
-            -o logs/cvfd_${FOLD}.out -e logs/cvfd_${FOLD}.err \
+            -q gpuv100 \
+            -n 8 \
+            -R "span[hosts=1]" \
+            -R "rusage[mem=16000]" \
+            -gpu "num=1" \
+            -W 0:20 \
+            -oo logs/cvfd_${FOLD}.out \
+            -eo logs/cvfd_${FOLD}.err \
             python -m src.utils.prepare_classification_cv_feature_driven --fold $FOLD \
             | awk '{print $2}' | tr -d '<>')
     fi
@@ -175,4 +220,3 @@ echo "        logs/foldprobs_*.out"
 echo "        logs/mergeprobs.out"
 echo "        logs/cvfd_*.out"
 echo ""
-echo "  Expected total wall time: ~80 minutes"

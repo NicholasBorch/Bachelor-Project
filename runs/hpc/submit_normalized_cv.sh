@@ -1,46 +1,23 @@
-#!/bin/sh
-# runs/hpc/submit_normalized_cv.sh
+#!/bin/bash
+# Manual single-fold resubmission for normalised IDN.
+# Usage: bash runs/hpc/submit_normalized_cv.sh <fold>
 
+set -euo pipefail
 cd $HOME/projects/Bachelor-Project
 source .venv/bin/activate
 mkdir -p logs
+export PYTHONUNBUFFERED=1
 
-RUNNING=0
-JOBIDS=()
+FOLD=${1:?Usage: bash submit_normalized_cv.sh <fold>}
 
-for FOLD in $(seq 0 9); do
-    if [ $RUNNING -lt 5 ]; then
-        JOBID=$(bsub \
-            -J "cvnorm${FOLD}" \
-            -q gpuv100 \
-            -n 4 \
-            -R "span[hosts=1]" \
-            -R "rusage[mem=8GB]" \
-            -gpu "num=1:mode=exclusive_process" \
-            -W 0:30 \
-            -o logs/cvnorm_${FOLD}.out \
-            -e logs/cvnorm_${FOLD}.err \
-            python -m src.utils.prepare_classification_cv --fold $FOLD --method normalized \
-            | awk '{print $2}' | tr -d '<>')
-    else
-        WAIT_ID=${JOBIDS[$((RUNNING - 5))]}
-        JOBID=$(bsub \
-            -J "cvnorm${FOLD}" \
-            -w "done(${WAIT_ID})" \
-            -q gpuv100 \
-            -n 4 \
-            -R "span[hosts=1]" \
-            -R "rusage[mem=8GB]" \
-            -gpu "num=1:mode=exclusive_process" \
-            -W 0:30 \
-            -o logs/cvnorm_${FOLD}.out \
-            -e logs/cvnorm_${FOLD}.err \
-            python -m src.utils.prepare_classification_cv --fold $FOLD --method normalized \
-            | awk '{print $2}' | tr -d '<>')
-    fi
-    JOBIDS+=($JOBID)
-    RUNNING=$((RUNNING + 1))
-    echo "  Fold $FOLD submitted: job $JOBID"
-done
-
-echo "CVNORM_JOBS=${JOBIDS[@]}"
+bsub \
+    -J "cvnorm${FOLD}" \
+    -q gpuv100 \
+    -n 8 \
+    -R "span[hosts=1]" \
+    -R "rusage[mem=16000]" \
+    -gpu "num=1" \
+    -W 0:30 \
+    -oo logs/cvnorm_${FOLD}.out \
+    -eo logs/cvnorm_${FOLD}.err \
+    python -m src.utils.prepare_classification_cv --fold $FOLD --method normalized

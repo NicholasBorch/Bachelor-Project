@@ -1,47 +1,24 @@
-#!/bin/sh
-# runs/hpc/submit_fold_probs.sh
+#!/bin/bash
+# Manual single-fold resubmission for fold prob collection.
+# Usage: bash runs/hpc/submit_fold_probs.sh <fold>
 
+set -euo pipefail
 cd $HOME/projects/Bachelor-Project
 source .venv/bin/activate
 mkdir -p logs
 mkdir -p data/processed/HAM10000/fold_probs
+export PYTHONUNBUFFERED=1
 
-RUNNING=0
-JOBIDS=()
+FOLD=${1:?Usage: bash submit_fold_probs.sh <fold>}
 
-for FOLD in $(seq 0 9); do
-    if [ $RUNNING -lt 5 ]; then
-        JOBID=$(bsub \
-            -J "foldprobs${FOLD}" \
-            -q gpuv100 \
-            -n 4 \
-            -R "span[hosts=1]" \
-            -R "rusage[mem=16GB]" \
-            -gpu "num=1:mode=exclusive_process" \
-            -W 1:00 \
-            -o logs/foldprobs_${FOLD}.out \
-            -e logs/foldprobs_${FOLD}.err \
-            python -m src.utils.collect_fold_probs --fold $FOLD \
-            | awk '{print $2}' | tr -d '<>')
-    else
-        WAIT_ID=${JOBIDS[$((RUNNING - 5))]}
-        JOBID=$(bsub \
-            -J "foldprobs${FOLD}" \
-            -w "done(${WAIT_ID})" \
-            -q gpuv100 \
-            -n 4 \
-            -R "span[hosts=1]" \
-            -R "rusage[mem=16GB]" \
-            -gpu "num=1:mode=exclusive_process" \
-            -W 1:00 \
-            -o logs/foldprobs_${FOLD}.out \
-            -e logs/foldprobs_${FOLD}.err \
-            python -m src.utils.collect_fold_probs --fold $FOLD \
-            | awk '{print $2}' | tr -d '<>')
-    fi
-    JOBIDS+=($JOBID)
-    RUNNING=$((RUNNING + 1))
-    echo "  Fold $FOLD submitted: job $JOBID"
-done
-
-echo "FOLDPROBS_JOBS=${JOBIDS[@]}"
+bsub \
+    -J "foldprobs${FOLD}" \
+    -q gpuv100 \
+    -n 8 \
+    -R "span[hosts=1]" \
+    -R "rusage[mem=16000]" \
+    -gpu "num=1" \
+    -W 1:00 \
+    -oo logs/foldprobs_${FOLD}.out \
+    -eo logs/foldprobs_${FOLD}.err \
+    python -m src.utils.collect_fold_probs --fold $FOLD
