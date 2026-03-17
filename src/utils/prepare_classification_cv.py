@@ -31,7 +31,7 @@ from src.classification.noise_idn import generate_instance_dependent_noisy_label
 from src.classification.folds import make_folds_lesion_stratified
 from configs.classification_default import (
     SEED,
-    OUTER_FOLDS,
+    FOLDS,
     NOISE_RATES,
     NORM_STD,
     IMAGE_SIZE,
@@ -54,7 +54,7 @@ def process_fold(
     out_root: Path,
 ) -> None:
     normalize = (method == "normalized")
-    df_folds  = make_folds_lesion_stratified(df, n_splits=OUTER_FOLDS, seed=SEED)
+    df_folds  = make_folds_lesion_stratified(df, n_splits=FOLDS, seed=SEED)
 
     test_df  = df_folds[df_folds["fold"] == fold_id].copy().reset_index(drop=True)
     train_df = df_folds[df_folds["fold"] != fold_id].copy().reset_index(drop=True)
@@ -114,8 +114,8 @@ def main() -> None:
     parser.add_argument("--method", choices=["standard", "normalized"], required=True)
     args = parser.parse_args()
 
-    if not (0 <= args.fold < OUTER_FOLDS):
-        raise ValueError(f"--fold must be in [0, {OUTER_FOLDS - 1}], got {args.fold}")
+    if not (0 <= args.fold < FOLDS):
+        raise ValueError(f"--fold must be in [0, {FOLDS - 1}], got {args.fold}")
 
     seed_everything(SEED)
 
@@ -127,7 +127,7 @@ def main() -> None:
     out_root.mkdir(parents=True, exist_ok=True)
 
     print(f"=== Prepare Classification CV ===")
-    print(f"method={args.method} | fold={args.fold} | SEED={SEED} | OUTER_FOLDS={OUTER_FOLDS}")
+    print(f"method={args.method} | fold={args.fold} | SEED={SEED} | FOLDS={FOLDS}")
 
     df = pd.read_csv(meta_path)
     df["image_id"]  = df["image_id"].astype(str)

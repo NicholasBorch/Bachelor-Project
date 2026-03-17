@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 
 from src.common.io import project_root, class_mapping
-from configs.classification_default import OUTER_FOLDS
+from configs.classification_default import FOLDS
 
 
 def main() -> None:
@@ -33,12 +33,12 @@ def main() -> None:
     num_classes = len(c2i)
     N           = len(df)
 
-    print(f"Merging fold probs | N={N} | C={num_classes} | OUTER_FOLDS={OUTER_FOLDS}")
+    print(f"Merging fold probs | N={N} | C={num_classes} | FOLDS={FOLDS}")
 
     # Initialise with NaNs — any unfilled row reveals a missing fold job
     fold_probs_full = np.full((N, num_classes), np.nan, dtype=np.float32)
 
-    for fold_id in range(OUTER_FOLDS):
+    for fold_id in range(FOLDS):
         probs_path   = fold_dir / f"fold_{fold_id:02d}_probs.npy"
         indices_path = fold_dir / f"fold_{fold_id:02d}_indices.npy"
 
