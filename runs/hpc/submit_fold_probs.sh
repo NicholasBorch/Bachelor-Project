@@ -1,23 +1,15 @@
 #!/bin/bash
-# Manual single-fold resubmission for fold prob collection.
-# Usage: bash runs/hpc/submit_fold_probs.sh <fold>
+#BSUB -q gpuv100
+#BSUB -n 8
+#BSUB -R "span[hosts=1]"
+#BSUB -R "rusage[mem=16000]"
+#BSUB -gpu "num=1"
+#BSUB -W 1:00
 
 set -euo pipefail
-cd $HOME/projects/Bachelor-Project
-mkdir -p logs
+cd ~/projects/Bachelor-Project
+source .venv/bin/activate
+export PYTHONUNBUFFERED=1
+
 mkdir -p data/processed/HAM10000/fold_probs
-VENV="$HOME/projects/Bachelor-Project/.venv/bin/activate"
-
-FOLD=${1:?Usage: bash submit_fold_probs.sh <fold>}
-
-bsub \
-    -J "foldprobs${FOLD}" \
-    -q gpuv100 \
-    -n 8 \
-    -R "span[hosts=1]" \
-    -R "rusage[mem=16000]" \
-    -gpu "num=1" \
-    -W 1:00 \
-    -oo logs/foldprobs_${FOLD}.out \
-    -eo logs/foldprobs_${FOLD}.err \
-    bash -c "source ${VENV} && python -m src.utils.collect_fold_probs --fold ${FOLD}"
+python -m src.utils.collect_fold_probs --fold $FOLD

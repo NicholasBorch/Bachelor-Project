@@ -14,7 +14,6 @@
 set -euo pipefail
 cd $HOME/projects/Bachelor-Project
 mkdir -p logs
-VENV="$HOME/projects/Bachelor-Project/.venv/bin/activate"
 
 echo "============================================"
 echo "  Noise Preparation — 10-Fold CV"
@@ -25,17 +24,11 @@ echo ""
 echo "Step 1a: Standard IDN (10 folds)..."
 STD_JOBIDS=()
 for FOLD in $(seq 0 9); do
-    JOBID=$(bsub \
+    JOBID=$(FOLD=$FOLD bsub \
         -J "cvstd${FOLD}" \
-        -q gpuv100 \
-        -n 8 \
-        -R "span[hosts=1]" \
-        -R "rusage[mem=16000]" \
-        -gpu "num=1" \
-        -W 0:30 \
         -oo logs/cvstd_${FOLD}.out \
         -eo logs/cvstd_${FOLD}.err \
-        bash -c "source ${VENV} && python -m src.utils.prepare_classification_cv --fold ${FOLD} --method standard" \
+        < runs/hpc/submit_standard_cv.sh \
         | awk '{print $2}' | tr -d '<>')
     STD_JOBIDS+=($JOBID)
     echo "  Fold $FOLD → job $JOBID"
@@ -46,17 +39,11 @@ echo ""
 echo "Step 1b: Normalised IDN (10 folds)..."
 NORM_JOBIDS=()
 for FOLD in $(seq 0 9); do
-    JOBID=$(bsub \
+    JOBID=$(FOLD=$FOLD bsub \
         -J "cvnorm${FOLD}" \
-        -q gpuv100 \
-        -n 8 \
-        -R "span[hosts=1]" \
-        -R "rusage[mem=16000]" \
-        -gpu "num=1" \
-        -W 0:30 \
         -oo logs/cvnorm_${FOLD}.out \
         -eo logs/cvnorm_${FOLD}.err \
-        bash -c "source ${VENV} && python -m src.utils.prepare_classification_cv --fold ${FOLD} --method normalized" \
+        < runs/hpc/submit_normalized_cv.sh \
         | awk '{print $2}' | tr -d '<>')
     NORM_JOBIDS+=($JOBID)
     echo "  Fold $FOLD → job $JOBID"
@@ -65,20 +52,13 @@ done
 # ── Step 2: Fold prob collection ──────────────────────────────────────────────
 echo ""
 echo "Step 2: Fold prob collection (10 folds)..."
-mkdir -p data/processed/HAM10000/fold_probs
 PROBS_JOBIDS=()
 for FOLD in $(seq 0 9); do
-    JOBID=$(bsub \
+    JOBID=$(FOLD=$FOLD bsub \
         -J "foldprobs${FOLD}" \
-        -q gpuv100 \
-        -n 8 \
-        -R "span[hosts=1]" \
-        -R "rusage[mem=16000]" \
-        -gpu "num=1" \
-        -W 1:00 \
         -oo logs/foldprobs_${FOLD}.out \
         -eo logs/foldprobs_${FOLD}.err \
-        bash -c "source ${VENV} && python -m src.utils.collect_fold_probs --fold ${FOLD}" \
+        < runs/hpc/submit_fold_probs.sh \
         | awk '{print $2}' | tr -d '<>')
     PROBS_JOBIDS+=($JOBID)
     echo "  Fold $FOLD → job $JOBID"
@@ -94,13 +74,9 @@ MERGE_DEPENDS=${MERGE_DEPENDS%&&}
 MERGE_JOB=$(bsub \
     -J "mergeprobs" \
     -w "$MERGE_DEPENDS" \
-    -q hpc \
-    -n 1 \
-    -R "rusage[mem=8000]" \
-    -W 0:10 \
     -oo logs/mergeprobs.out \
     -eo logs/mergeprobs.err \
-    bash -c "source ${VENV} && python -m src.utils.merge_fold_probs" \
+    < runs/hpc/submit_merge_fold_probs.sh \
     | awk '{print $2}' | tr -d '<>')
 echo "  Merge job → $MERGE_JOB"
 
@@ -109,18 +85,12 @@ echo ""
 echo "Step 4: Feature-driven IDN (10 folds, waits for merge)..."
 FD_JOBIDS=()
 for FOLD in $(seq 0 9); do
-    JOBID=$(bsub \
+    JOBID=$(FOLD=$FOLD bsub \
         -J "cvfd${FOLD}" \
         -w "done(${MERGE_JOB})" \
-        -q gpuv100 \
-        -n 8 \
-        -R "span[hosts=1]" \
-        -R "rusage[mem=16000]" \
-        -gpu "num=1" \
-        -W 0:20 \
         -oo logs/cvfd_${FOLD}.out \
         -eo logs/cvfd_${FOLD}.err \
-        bash -c "source ${VENV} && python -m src.utils.prepare_classification_cv_feature_driven --fold ${FOLD}" \
+        < runs/hpc/submit_feature_driven_cv.sh \
         | awk '{print $2}' | tr -d '<>')
     FD_JOBIDS+=($JOBID)
     echo "  Fold $FOLD → job $JOBID"
