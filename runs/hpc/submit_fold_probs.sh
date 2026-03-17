@@ -1,22 +1,47 @@
 #!/bin/sh
 # runs/hpc/submit_fold_probs.sh
-#BSUB -J fold_probs[0-9]%5
-#BSUB -q gpuv100
-#BSUB -n 4
-#BSUB -R "span[hosts=1]"
-#BSUB -R "rusage[mem=16GB]"
-#BSUB -M 16GB
-#BSUB -gpu "num=1:mode=exclusive_process"
-#BSUB -W 1:00
-#BSUB -o logs/fold_probs_%J_%I.out
-#BSUB -e logs/fold_probs_%J_%I.err
 
 cd $HOME/projects/Bachelor-Project
 source .venv/bin/activate
 mkdir -p logs
 mkdir -p data/processed/HAM10000/fold_probs
 
-echo "=== Fold Prob Collection | Fold $LSB_JOBINDEX ==="
-echo "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo none)"
-python -m src.utils.collect_fold_probs --fold $LSB_JOBINDEX
-echo "=== Done ==="
+RUNNING=0
+JOBIDS=()
+
+for FOLD in $(seq 0 9); do
+    if [ $RUNNING -lt 5 ]; then
+        JOBID=$(bsub \
+            -J "foldprobs${FOLD}" \
+            -q gpuv100 \
+            -n 4 \
+            -R "span[hosts=1]" \
+            -R "rusage[mem=16GB]" \
+            -gpu "num=1:mode=exclusive_process" \
+            -W 1:00 \
+            -o logs/foldprobs_${FOLD}.out \
+            -e logs/foldprobs_${FOLD}.err \
+            python -m src.utils.collect_fold_probs --fold $FOLD \
+            | awk '{print $2}' | tr -d '<>')
+    else
+        WAIT_ID=${JOBIDS[$((RUNNING - 5))]}
+        JOBID=$(bsub \
+            -J "foldprobs${FOLD}" \
+            -w "done(${WAIT_ID})" \
+            -q gpuv100 \
+            -n 4 \
+            -R "span[hosts=1]" \
+            -R "rusage[mem=16GB]" \
+            -gpu "num=1:mode=exclusive_process" \
+            -W 1:00 \
+            -o logs/foldprobs_${FOLD}.out \
+            -e logs/foldprobs_${FOLD}.err \
+            python -m src.utils.collect_fold_probs --fold $FOLD \
+            | awk '{print $2}' | tr -d '<>')
+    fi
+    JOBIDS+=($JOBID)
+    RUNNING=$((RUNNING + 1))
+    echo "  Fold $FOLD submitted: job $JOBID"
+done
+
+echo "FOLDPROBS_JOBS=${JOBIDS[@]}"
