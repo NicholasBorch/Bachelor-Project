@@ -1,5 +1,5 @@
 #!/bin/bash
-# runs/hpc/master_noise_submit.sh
+# runs/hpc/noise_idn/master_noise_submit.sh
 
 set -euo pipefail
 cd $HOME/projects/Bachelor-Project
@@ -14,7 +14,7 @@ echo ""
 echo "Step 1a: Standard IDN (10 folds)..."
 STD_JOBIDS=()
 for FOLD in $(seq 0 9); do
-    JOBID=$(sed "s/--fold \$FOLD/--fold ${FOLD}/" runs/hpc/submit_standard_cv.sh \
+    JOBID=$(sed "s/--fold \$FOLD/--fold ${FOLD}/" runs/hpc/noise_idn/submit_standard_cv.sh \
         | bsub \
             -J "cvstd${FOLD}" \
             -oo logs/cvstd_${FOLD}.out \
@@ -29,7 +29,7 @@ echo ""
 echo "Step 1b: Normalised IDN (10 folds)..."
 NORM_JOBIDS=()
 for FOLD in $(seq 0 9); do
-    JOBID=$(sed "s/--fold \$FOLD/--fold ${FOLD}/" runs/hpc/submit_normalized_cv.sh \
+    JOBID=$(sed "s/--fold \$FOLD/--fold ${FOLD}/" runs/hpc/noise_idn/submit_normalized_cv.sh \
         | bsub \
             -J "cvnorm${FOLD}" \
             -oo logs/cvnorm_${FOLD}.out \
@@ -44,7 +44,7 @@ echo ""
 echo "Step 2: Fold prob collection (10 folds)..."
 PROBS_JOBIDS=()
 for FOLD in $(seq 0 9); do
-    JOBID=$(sed "s/--fold \$FOLD/--fold ${FOLD}/" runs/hpc/submit_fold_probs.sh \
+    JOBID=$(sed "s/--fold \$FOLD/--fold ${FOLD}/" runs/hpc/noise_idn/submit_fold_probs.sh \
         | bsub \
             -J "foldprobs${FOLD}" \
             -oo logs/foldprobs_${FOLD}.out \
@@ -66,7 +66,7 @@ MERGE_JOB=$(bsub \
     -w "$MERGE_DEPENDS" \
     -oo logs/mergeprobs.out \
     -eo logs/mergeprobs.err \
-    < runs/hpc/submit_merge_fold_probs.sh \
+    < runs/hpc/noise_idn/submit_merge_fold_probs.sh \
     | awk '{print $2}' | tr -d '<>')
 echo "  Merge job → $MERGE_JOB"
 
@@ -75,7 +75,7 @@ echo ""
 echo "Step 4: Feature-driven IDN (10 folds, waits for merge)..."
 FD_JOBIDS=()
 for FOLD in $(seq 0 9); do
-    JOBID=$(sed "s/--fold \$FOLD/--fold ${FOLD}/" runs/hpc/submit_feature_driven_cv.sh \
+    JOBID=$(sed "s/--fold \$FOLD/--fold ${FOLD}/" runs/hpc/noise_idn/submit_feature_driven_cv.sh \
         | bsub \
             -J "cvfd${FOLD}" \
             -w "done(${MERGE_JOB})" \
