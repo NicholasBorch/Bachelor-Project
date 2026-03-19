@@ -1,3 +1,4 @@
+# src/methods/baseline.py
 # Standard cross-entropy baseline for HAM10000 classification.
 # Trains ResNet-50 with weighted cross-entropy and weighted sampler on noisy
 # training folds, evaluates on clean test folds at the end of fixed training.
@@ -37,7 +38,7 @@ def run_baseline_fold(
     tau: float,
     outer_fold: int,
     seed: int,
-    noise_type: str = "standard_idn",
+    noise_type: str,
     backbone_depth: int = 50,
     image_size: int = 224,
     epochs: int = 100,
@@ -47,7 +48,7 @@ def run_baseline_fold(
     device: Optional[torch.device] = None,
 ) -> dict:
     # Trains baseline for a fixed number of epochs on one noisy training fold
-    # and evaluates once on the clean test fold after the final epoch
+    # and evaluates once on the clean test fold after the final epoch.
     seed_everything(seed)
 
     if device is None:
@@ -61,7 +62,6 @@ def run_baseline_fold(
 
     train_labels = [c2i[str(dx)] for dx in train_noisy_df["dx"]]
 
-    # Datasets
     train_ds = HamTensorDataset(
         train_noisy_df, images_dir, c2i, get_transforms(image_size, augment=True)
     )
@@ -69,7 +69,6 @@ def run_baseline_fold(
         test_clean_df, images_dir, c2i, get_transforms(image_size, augment=False)
     )
 
-    # Weighted sampler ensures balanced class representation in every batch
     train_loader = DataLoader(
         train_ds,
         batch_size=batch_size,
@@ -85,7 +84,6 @@ def run_baseline_fold(
         pin_memory=True,
     )
 
-    # Model, loss, optimiser, scheduler
     model     = build_resnet(num_classes=num_classes, pretrained=True, depth=backbone_depth).to(device)
     criterion = nn.CrossEntropyLoss(
         weight=compute_class_weights(train_labels, num_classes, device)
@@ -93,7 +91,6 @@ def run_baseline_fold(
     optimiser = torch.optim.Adam(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimiser, T_max=epochs)
 
-    # Logger writes config and per-epoch training metrics to disk
     out_dir = make_output_dir(results_root, "baseline", tau, outer_fold, noise_type)
     config  = RunConfig(
         method="baseline",
@@ -115,12 +112,9 @@ def run_baseline_fold(
     print(f"    Device        : {device} | Backbone: resnet{backbone_depth}")
     print(f"    Epochs        : {epochs}")
 
-    # Fixed-epoch training loop — no early stopping
     for epoch in range(epochs):
         train_loss = train_one_epoch(model, train_loader, criterion, optimiser, device)
         scheduler.step()
-
-        # Log training loss each epoch; test evaluation happens once at the end
         logger.log_epoch(epoch + 1, train_loss)
         print(f"    Epoch {epoch+1:03d}/{epochs} | train_loss={train_loss:.4f}")
 
