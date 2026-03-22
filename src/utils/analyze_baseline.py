@@ -1,17 +1,17 @@
-"""
-analyze_noise_rates.py
+# src/utils/analyze_baseline.py
+#
+# Loads all test_metrics.json and training_log.json files from the baseline
+# results directory and produces visualisations and summary statistics.
+#
+# Usage:
+#   python -m src.utils.analyze_baseline --noise_type standard_idn
+#   python -m src.utils.analyze_baseline --noise_type normalized_idn
+#   python -m src.utils.analyze_baseline --noise_type feature_driven_idn
 
-Compares model performance across noise rates (tau levels) for the
-feature_driven_idn baseline on HAM10000.
+from __future__ import annotations
 
-Run from:  src/  (or wherever your analysis scripts live)
-Results:   ../../results/HAM10000/baseline/feature_driven_idn/
-Outputs:   saves all figures to  results/HAM10000/baseline/feature_driven_idn/plots/
-           also prints a summary table to the terminal.
-"""
-
+import argparse
 import json
-import os
 import warnings
 from pathlib import Path
 
@@ -21,19 +21,13 @@ import numpy as np
 import pandas as pd
 from scipy.stats import wilcoxon
 
+from src.common.io import project_root
+
 warnings.filterwarnings("ignore")
 
-# ── paths ──────────────────────────────────────────────────────────────────────
-SCRIPT_DIR   = Path(__file__).resolve().parent
-RESULTS_ROOT = SCRIPT_DIR / ".." / ".." / "results" / "HAM10000" / "baseline" / "standardized_idn"
-RESULTS_ROOT = RESULTS_ROOT.resolve()
-PLOT_DIR     = RESULTS_ROOT / "plots"
-PLOT_DIR.mkdir(parents=True, exist_ok=True)
-
-# ── constants ──────────────────────────────────────────────────────────────────
 TAU_DIRS   = ["clean", "tau05", "tau10", "tau15", "tau20", "tau25", "tau30"]
 TAU_LABELS = ["clean", "τ=0.05", "τ=0.10", "τ=0.15", "τ=0.20", "τ=0.25", "τ=0.30"]
-FOLD_DIRS  = [f"fold_{i:02d}" for i in range(5)]
+FOLD_DIRS  = [f"fold_{i:02d}" for i in range(10)]
 CLASS_NAMES = ["akiec", "bcc", "bkl", "df", "mel", "nv", "vasc"]
 
 SCALAR_METRICS = [
@@ -45,27 +39,26 @@ SCALAR_METRICS = [
     "auc_macro_ovr",
 ]
 
-PALETTE = plt.cm.tab10.colors  # one colour per tau level
+PALETTE = plt.cm.tab10.colors
 
-# ── helpers ────────────────────────────────────────────────────────────────────
+NOISE_TYPE_LABELS = {
+    "standard_idn":       "Standard IDN",
+    "normalized_idn":     "Normalised IDN",
+    "feature_driven_idn": "Feature-Driven IDN",
+}
+
 
 def load_json(path: Path):
     with open(path) as f:
         return json.load(f)
 
 
-def collect_data():
-    """
-    Returns
-    -------
-    records : list[dict]   – one entry per (tau, fold)
-    training : dict        – tau → list of loss arrays (one per fold)
-    """
+def collect_data(results_root: Path):
     records  = []
     training = {}
 
     for tau in TAU_DIRS:
-        tau_path = RESULTS_ROOT / tau
+        tau_path = results_root / tau
         if not tau_path.exists():
             print(f"  [skip] {tau_path} not found")
             continue
@@ -76,7 +69,6 @@ def collect_data():
             if not fold_path.exists():
                 continue
 
-            # ── test metrics ──────────────────────────────────────────────────
             tm_path = fold_path / "test_metrics.json"
             if tm_path.exists():
                 tm = load_json(tm_path)
@@ -88,7 +80,6 @@ def collect_data():
                 row["confusion_matrix"] = tm.get("confusion_matrix", None)
                 records.append(row)
 
-            # ── training log ──────────────────────────────────────────────────
             tl_path = fold_path / "training_log.json"
             if tl_path.exists():
                 tl = load_json(tl_path)
@@ -101,19 +92,17 @@ def collect_data():
     return records, training
 
 
-# ── figure 1 : summary table ───────────────────────────────────────────────────
-
-def print_summary_table(df: pd.DataFrame):
+def print_summary_table(df: pd.DataFrame, noise_label: str):
     print("\n" + "═" * 90)
-    print("  PERFORMANCE SUMMARY  (mean ± std across folds)")
+    print(f"  PERFORMANCE SUMMARY — {noise_label}  (mean ± std across 10 folds)")
     print("═" * 90)
     metric_labels = {
-        "accuracy":       "Accuracy",
+        "accuracy":          "Accuracy",
         "balanced_accuracy": "Bal. Acc",
-        "macro_f1":       "Macro F1",
-        "weighted_f1":    "Wtd F1",
-        "kappa":          "Kappa",
-        "auc_macro_ovr":  "AUC OvR",
+        "macro_f1":          "Macro F1",
+        "weighted_f1":       "Wtd F1",
+        "kappa":             "Kappa",
+        "auc_macro_ovr":     "AUC OvR",
     }
     header = f"{'Noise level':<12}" + "".join(f"{v:>16}" for v in metric_labels.values())
     print(header)
@@ -133,18 +122,19 @@ def print_summary_table(df: pd.DataFrame):
     print("═" * 90 + "\n")
 
 
-# ── figure 2 : key metrics vs noise rate ──────────────────────────────────────
-
-def plot_metrics_vs_tau(df: pd.DataFrame):
+def plot_metrics_vs_tau(df: pd.DataFrame, noise_label: str, plot_dir: Path):
     metrics = ["balanced_accuracy", "macro_f1", "kappa", "auc_macro_ovr"]
     labels  = ["Balanced Accuracy", "Macro F1", "Cohen's Kappa", "AUC (macro OvR)"]
 
     taus_present = [t for t in TAU_DIRS if t in df["tau"].values]
-    x = np.arange(len(taus_present))
-    x_labels = [TAU_LABELS[TAU_DIRS.index(t)] for t in taus_present]
+    x            = np.arange(len(taus_present))
+    x_labels     = [TAU_LABELS[TAU_DIRS.index(t)] for t in taus_present]
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 8), constrained_layout=True)
-    fig.suptitle("Key Metrics vs. Noise Rate\n(mean ± std across 5 folds)", fontsize=14)
+    fig.suptitle(
+        f"Key Metrics vs. Noise Rate — {noise_label}\n(mean ± std across 10 folds)",
+        fontsize=14,
+    )
 
     for ax, metric, label in zip(axes.flat, metrics, labels):
         means, stds = [], []
@@ -157,7 +147,6 @@ def plot_metrics_vs_tau(df: pd.DataFrame):
         ax.plot(x, means, marker="o", linewidth=2, color="#2563eb")
         ax.fill_between(x, means - stds, means + stds, alpha=0.2, color="#2563eb")
         ax.scatter(x, means, zorder=5, color="#2563eb", s=60)
-
         ax.set_xticks(x)
         ax.set_xticklabels(x_labels, fontsize=9)
         ax.set_title(label, fontweight="bold")
@@ -166,16 +155,14 @@ def plot_metrics_vs_tau(df: pd.DataFrame):
         ax.grid(axis="y", linestyle="--", alpha=0.5)
         ax.spines[["top", "right"]].set_visible(False)
 
-    fig.savefig(PLOT_DIR / "metrics_vs_tau.png", dpi=150)
+    fig.savefig(plot_dir / "metrics_vs_tau.png", dpi=150)
     plt.close(fig)
-    print(f"  Saved: {PLOT_DIR / 'metrics_vs_tau.png'}")
+    print(f"  Saved: {plot_dir / 'metrics_vs_tau.png'}")
 
 
-# ── figure 3 : per-class F1 heatmap ───────────────────────────────────────────
-
-def plot_perclass_f1_heatmap(df: pd.DataFrame):
+def plot_perclass_f1_heatmap(df: pd.DataFrame, noise_label: str, plot_dir: Path):
     taus_present = [t for t in TAU_DIRS if t in df["tau"].values]
-    x_labels = [TAU_LABELS[TAU_DIRS.index(t)] for t in taus_present]
+    x_labels     = [TAU_LABELS[TAU_DIRS.index(t)] for t in taus_present]
 
     matrix = np.zeros((len(CLASS_NAMES), len(taus_present)))
     for j, tau in enumerate(taus_present):
@@ -186,43 +173,40 @@ def plot_perclass_f1_heatmap(df: pd.DataFrame):
 
     fig, ax = plt.subplots(figsize=(10, 5), constrained_layout=True)
     im = ax.imshow(matrix, aspect="auto", cmap="RdYlGn", vmin=0, vmax=1)
-
     ax.set_xticks(range(len(taus_present)))
     ax.set_xticklabels(x_labels, fontsize=10)
     ax.set_yticks(range(len(CLASS_NAMES)))
     ax.set_yticklabels([c.upper() for c in CLASS_NAMES], fontsize=10)
-    ax.set_title("Per-Class F1 Score across Noise Rates\n(mean across 5 folds)", fontsize=13)
+    ax.set_title(
+        f"Per-Class F1 Score across Noise Rates — {noise_label}\n(mean across 10 folds)",
+        fontsize=13,
+    )
 
     for i in range(len(CLASS_NAMES)):
         for j in range(len(taus_present)):
             val = matrix[i, j]
             if not np.isnan(val):
-                ax.text(j, i, f"{val:.2f}",
-                        ha="center", va="center", fontsize=9,
+                ax.text(j, i, f"{val:.2f}", ha="center", va="center", fontsize=9,
                         color="black" if 0.3 < val < 0.75 else "white")
 
     cbar = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02)
     cbar.set_label("F1 Score")
-
-    fig.savefig(PLOT_DIR / "perclass_f1_heatmap.png", dpi=150)
+    fig.savefig(plot_dir / "perclass_f1_heatmap.png", dpi=150)
     plt.close(fig)
-    print(f"  Saved: {PLOT_DIR / 'perclass_f1_heatmap.png'}")
+    print(f"  Saved: {plot_dir / 'perclass_f1_heatmap.png'}")
 
 
-# ── figure 4 : training loss curves ───────────────────────────────────────────
-
-def plot_training_curves(training: dict):
+def plot_training_curves(training: dict, noise_label: str, plot_dir: Path):
     fig, ax = plt.subplots(figsize=(11, 5), constrained_layout=True)
 
     for i, tau in enumerate(TAU_DIRS):
         if tau not in training:
             continue
-        folds = training[tau]
+        folds   = training[tau]
         max_len = max(len(f) for f in folds)
-        # pad shorter folds with NaN so we can stack
-        arr = np.full((len(folds), max_len), np.nan)
+        arr     = np.full((len(folds), max_len), np.nan)
         for k, f in enumerate(folds):
-            arr[k, : len(f)] = f
+            arr[k, :len(f)] = f
 
         mean_loss = np.nanmean(arr, axis=0)
         std_loss  = np.nanstd(arr, axis=0)
@@ -231,47 +215,43 @@ def plot_training_curves(training: dict):
         color     = PALETTE[i % len(PALETTE)]
 
         ax.plot(epochs, mean_loss, label=label, color=color, linewidth=2)
-        ax.fill_between(epochs,
-                        mean_loss - std_loss,
-                        mean_loss + std_loss,
+        ax.fill_between(epochs, mean_loss - std_loss, mean_loss + std_loss,
                         alpha=0.15, color=color)
 
     ax.set_xlabel("Epoch", fontsize=11)
     ax.set_ylabel("Training Loss", fontsize=11)
-    ax.set_title("Training Loss Curves across Noise Rates\n(mean ± std across 5 folds)", fontsize=13)
+    ax.set_title(
+        f"Training Loss Curves — {noise_label}\n(mean ± std across 10 folds)",
+        fontsize=13,
+    )
     ax.legend(title="Noise level", fontsize=9, title_fontsize=9)
     ax.grid(linestyle="--", alpha=0.4)
     ax.spines[["top", "right"]].set_visible(False)
-
-    fig.savefig(PLOT_DIR / "training_loss_curves.png", dpi=150)
+    fig.savefig(plot_dir / "training_loss_curves.png", dpi=150)
     plt.close(fig)
-    print(f"  Saved: {PLOT_DIR / 'training_loss_curves.png'}")
+    print(f"  Saved: {plot_dir / 'training_loss_curves.png'}")
 
 
-# ── figure 5 : confusion matrices ─────────────────────────────────────────────
-
-def plot_confusion_matrices(df: pd.DataFrame):
+def plot_confusion_matrices(df: pd.DataFrame, noise_label: str, plot_dir: Path):
     taus_present = [t for t in TAU_DIRS if t in df["tau"].values]
-    n = len(taus_present)
+    n    = len(taus_present)
     cols = 3
     rows = int(np.ceil(n / cols))
 
-    fig, axes = plt.subplots(rows, cols,
-                             figsize=(cols * 5, rows * 4.5),
-                             constrained_layout=True)
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 5, rows * 4.5),
+                              constrained_layout=True)
     axes = np.array(axes).flatten()
-    fig.suptitle("Confusion Matrices (summed across 5 folds)", fontsize=14)
+    fig.suptitle(f"Confusion Matrices — {noise_label} (summed across 10 folds)", fontsize=14)
 
     for idx, tau in enumerate(taus_present):
-        ax = axes[idx]
+        ax  = axes[idx]
         sub = df[df["tau"] == tau]
         cms = [np.array(r) for r in sub["confusion_matrix"].dropna() if r is not None]
         if not cms:
             ax.axis("off")
             continue
 
-        cm_sum = np.sum(cms, axis=0).astype(float)
-        # normalise row-wise (true-class recall)
+        cm_sum  = np.sum(cms, axis=0).astype(float)
         row_sums = cm_sum.sum(axis=1, keepdims=True)
         cm_norm  = np.divide(cm_sum, row_sums, where=row_sums != 0)
 
@@ -287,8 +267,7 @@ def plot_confusion_matrices(df: pd.DataFrame):
         for i in range(len(CLASS_NAMES)):
             for j in range(len(CLASS_NAMES)):
                 val = cm_norm[i, j]
-                ax.text(j, i, f"{val:.2f}",
-                        ha="center", va="center", fontsize=7,
+                ax.text(j, i, f"{val:.2f}", ha="center", va="center", fontsize=7,
                         color="white" if val > 0.55 else "black")
 
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
@@ -296,28 +275,27 @@ def plot_confusion_matrices(df: pd.DataFrame):
     for idx in range(len(taus_present), len(axes)):
         axes[idx].axis("off")
 
-    fig.savefig(PLOT_DIR / "confusion_matrices.png", dpi=150)
+    fig.savefig(plot_dir / "confusion_matrices.png", dpi=150)
     plt.close(fig)
-    print(f"  Saved: {PLOT_DIR / 'confusion_matrices.png'}")
+    print(f"  Saved: {plot_dir / 'confusion_matrices.png'}")
 
 
-# ── figure 6 : per-fold scatter strip (balanced acc) ──────────────────────────
-
-def plot_fold_scatter(df: pd.DataFrame):
-    """Shows every individual fold result alongside the mean, for balanced acc."""
-    metrics = ["balanced_accuracy", "macro_f1", "kappa", "auc_macro_ovr"]
-    labels  = ["Balanced Accuracy", "Macro F1", "Cohen's Kappa", "AUC (macro OvR)"]
-
+def plot_fold_scatter(df: pd.DataFrame, noise_label: str, plot_dir: Path):
+    metrics  = ["balanced_accuracy", "macro_f1", "kappa", "auc_macro_ovr"]
+    labels   = ["Balanced Accuracy", "Macro F1", "Cohen's Kappa", "AUC (macro OvR)"]
     taus_present = [t for t in TAU_DIRS if t in df["tau"].values]
     x_labels = [TAU_LABELS[TAU_DIRS.index(t)] for t in taus_present]
-    x = np.arange(len(taus_present))
+    x        = np.arange(len(taus_present))
 
     fig, axes = plt.subplots(2, 2, figsize=(13, 8), constrained_layout=True)
-    fig.suptitle("Per-Fold Results with Mean (individual folds shown as dots)", fontsize=13)
+    fig.suptitle(
+        f"Per-Fold Results with Mean — {noise_label}\n(individual folds shown as dots)",
+        fontsize=13,
+    )
 
     for ax, metric, label in zip(axes.flat, metrics, labels):
         for j, tau in enumerate(taus_present):
-            vals = df[df["tau"] == tau][metric].dropna().values
+            vals   = df[df["tau"] == tau][metric].dropna().values
             jitter = np.random.default_rng(42).uniform(-0.12, 0.12, len(vals))
             ax.scatter(x[j] + jitter, vals, alpha=0.7, s=40,
                        color=PALETTE[j % len(PALETTE)], zorder=4)
@@ -332,14 +310,12 @@ def plot_fold_scatter(df: pd.DataFrame):
         ax.grid(axis="y", linestyle="--", alpha=0.4)
         ax.spines[["top", "right"]].set_visible(False)
 
-    fig.savefig(PLOT_DIR / "fold_scatter.png", dpi=150)
+    fig.savefig(plot_dir / "fold_scatter.png", dpi=150)
     plt.close(fig)
-    print(f"  Saved: {PLOT_DIR / 'fold_scatter.png'}")
+    print(f"  Saved: {plot_dir / 'fold_scatter.png'}")
 
 
-# ── figure 7 : CSV export ──────────────────────────────────────────────────────
-
-def save_csv(df: pd.DataFrame):
+def save_csv(df: pd.DataFrame, plot_dir: Path):
     out = []
     for tau, label in zip(TAU_DIRS, TAU_LABELS):
         sub = df[df["tau"] == tau]
@@ -356,19 +332,16 @@ def save_csv(df: pd.DataFrame):
             row[f"f1_{cls}_std"]  = round(vals.std(),  4) if len(vals) else np.nan
         out.append(row)
 
-    csv_path = PLOT_DIR / "aggregated_results.csv"
+    csv_path = plot_dir / "aggregated_results.csv"
     pd.DataFrame(out).to_csv(csv_path, index=False)
     print(f"  Saved: {csv_path}")
 
 
-# ── figure 8 : clean vs noisy comparison with CIs & significance ──────────────
-
 def _bootstrap_ci(values: np.ndarray, n_boot: int = 2000, ci: float = 0.95, seed: int = 0):
-    """Return (mean, lower, upper) via percentile bootstrap."""
-    rng = np.random.default_rng(seed)
+    rng   = np.random.default_rng(seed)
     boots = rng.choice(values, size=(n_boot, len(values)), replace=True).mean(axis=1)
-    lo = np.percentile(boots, 100 * (1 - ci) / 2)
-    hi = np.percentile(boots, 100 * (1 + ci) / 2)
+    lo    = np.percentile(boots, 100 * (1 - ci) / 2)
+    hi    = np.percentile(boots, 100 * (1 + ci) / 2)
     return values.mean(), lo, hi
 
 
@@ -379,52 +352,39 @@ def _significance_stars(p: float) -> str:
         return "**"
     elif p < 0.05:
         return "*"
-    else:
-        return "ns"
+    return "ns"
 
 
-def plot_clean_vs_noisy(df: pd.DataFrame):
-    """
-    For each of the four key metrics, draw a bar chart where:
-      • 'clean' bar is shown in a neutral colour with its 95 % bootstrap CI
-      • each noisy tau bar is coloured by severity and carries its own CI
-      • a paired Wilcoxon signed-rank test (clean vs each tau, matched by fold)
-        is printed and significance stars are drawn above each bar
-      • the absolute Δ drop from clean is annotated inside each noisy bar
-    The same-fold pairing is essential: fold_00 clean vs fold_00 tau10, etc.
-    """
-    metrics = ["balanced_accuracy", "macro_f1", "kappa", "auc_macro_ovr"]
+def plot_clean_vs_noisy(df: pd.DataFrame, noise_label: str, plot_dir: Path):
+    metrics  = ["balanced_accuracy", "macro_f1", "kappa", "auc_macro_ovr"]
     m_labels = ["Balanced Accuracy", "Macro F1", "Cohen's Kappa", "AUC (macro OvR)"]
 
     noisy_taus   = [t for t in TAU_DIRS if t != "clean" and t in df["tau"].values]
     noisy_labels = [TAU_LABELS[TAU_DIRS.index(t)] for t in noisy_taus]
 
     if "clean" not in df["tau"].values:
-        print("  [skip] clean data not found – skipping clean_vs_noisy plot")
+        print("  [skip] clean data not found — skipping clean_vs_noisy plot")
         return
 
-    # colour ramp: light → dark orange/red for increasing noise
     noise_colours = plt.cm.YlOrRd(np.linspace(0.35, 0.85, len(noisy_taus)))
-    clean_colour  = "#4C9BE8"   # blue for clean
-
-    # ── make sure folds are aligned for pairing ──────────────────────────────
-    all_folds = sorted(df["fold"].unique())
+    clean_colour  = "#4C9BE8"
+    all_folds     = sorted(df["fold"].unique())
 
     print("\n" + "═" * 80)
-    print("  WILCOXON SIGNED-RANK TEST  (paired by fold, clean vs each tau)")
+    print(f"  WILCOXON SIGNED-RANK TEST — {noise_label}")
+    print("  (paired by fold, clean vs each tau)")
     print("  H₀: no difference in metric between clean and noisy training")
     print("═" * 80)
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 9), constrained_layout=True)
     fig.suptitle(
-        "Clean vs. Noisy Training — 95 % Bootstrap CI & Significance\n"
+        f"Clean vs. Noisy Training — {noise_label}\n"
+        "95% Bootstrap CI & Significance "
         "(Wilcoxon signed-rank, paired by fold;  * p<0.05  ** p<0.01  *** p<0.001)",
         fontsize=13,
     )
 
     for ax, metric, m_label in zip(axes.flat, metrics, m_labels):
-
-        # ── clean baseline ────────────────────────────────────────────────────
         clean_vals = np.array([
             df[(df["tau"] == "clean") & (df["fold"] == f)][metric].values[0]
             for f in all_folds
@@ -432,25 +392,17 @@ def plot_clean_vs_noisy(df: pd.DataFrame):
         ])
         c_mean, c_lo, c_hi = _bootstrap_ci(clean_vals)
 
-        # all tau positions: clean first, then noisy
         all_taus   = ["clean"] + noisy_taus
         all_labels = ["clean"] + noisy_labels
-        colours    = [clean_colour] + list(noise_colours)
         x          = np.arange(len(all_taus))
         bar_width  = 0.55
 
-        # draw clean bar
-        ax.bar(0, c_mean, width=bar_width, color=clean_colour,
-               alpha=0.88, zorder=3, label="clean")
-        ax.errorbar(0, c_mean,
-                    yerr=[[c_mean - c_lo], [c_hi - c_mean]],
+        ax.bar(0, c_mean, width=bar_width, color=clean_colour, alpha=0.88, zorder=3)
+        ax.errorbar(0, c_mean, yerr=[[c_mean - c_lo], [c_hi - c_mean]],
                     fmt="none", color="black", capsize=5, linewidth=1.8, zorder=5)
+        ax.axhline(c_mean, color=clean_colour, linewidth=1.2, linestyle="--",
+                   alpha=0.55, zorder=2)
 
-        # horizontal reference line at clean mean
-        ax.axhline(c_mean, color=clean_colour, linewidth=1.2,
-                   linestyle="--", alpha=0.55, zorder=2)
-
-        # ── noisy bars ────────────────────────────────────────────────────────
         print(f"\n  Metric: {m_label}")
         print(f"  {'Tau':<10}  {'clean':>7}  {'noisy':>7}  {'Δ':>7}  {'p-value':>10}  sig")
         print("  " + "─" * 55)
@@ -463,10 +415,8 @@ def plot_clean_vs_noisy(df: pd.DataFrame):
                 for f in all_folds
                 if len(df[(df["tau"] == tau) & (df["fold"] == f)][metric].values)
             ])
-
             n_mean, n_lo, n_hi = _bootstrap_ci(noisy_vals)
 
-            # paired Wilcoxon (requires at least one non-zero difference)
             diffs = clean_vals - noisy_vals
             if np.all(diffs == 0):
                 p_val = 1.0
@@ -477,38 +427,29 @@ def plot_clean_vs_noisy(df: pd.DataFrame):
                     p_val = 1.0
 
             stars = _significance_stars(p_val)
-            delta = n_mean - c_mean   # negative = degraded
+            delta = n_mean - c_mean
 
             print(f"  {label:<10}  {c_mean:>7.4f}  {n_mean:>7.4f}  "
                   f"{delta:>+7.4f}  {p_val:>10.4f}  {stars}")
 
-            # bar
-            ax.bar(j, n_mean, width=bar_width, color=colour,
-                   alpha=0.88, zorder=3)
-            ax.errorbar(j, n_mean,
-                        yerr=[[n_mean - n_lo], [n_hi - n_mean]],
+            ax.bar(j, n_mean, width=bar_width, color=colour, alpha=0.88, zorder=3)
+            ax.errorbar(j, n_mean, yerr=[[n_mean - n_lo], [n_hi - n_mean]],
                         fmt="none", color="black", capsize=5, linewidth=1.8, zorder=5)
 
-            # Δ annotation inside bar (only if bar is tall enough)
-            bar_top = max(n_mean, 0)
             if abs(delta) > 0.003:
-                ax.text(j, bar_top * 0.5, f"Δ{delta:+.3f}",
+                ax.text(j, max(n_mean, 0) * 0.5, f"Δ{delta:+.3f}",
                         ha="center", va="center", fontsize=8,
                         color="white", fontweight="bold", zorder=6)
 
-            # significance stars above bar
             star_y = max(n_hi, n_mean) + 0.012
-            ax.text(j, star_y, stars,
-                    ha="center", va="bottom", fontsize=10,
+            ax.text(j, star_y, stars, ha="center", va="bottom", fontsize=10,
                     color="#c0392b" if stars != "ns" else "#555555",
                     fontweight="bold", zorder=6)
 
-        # ── axes formatting ───────────────────────────────────────────────────
         y_min = df[df["tau"].isin(all_taus)][metric].min()
         y_max = df[df["tau"].isin(all_taus)][metric].max()
         y_pad = (y_max - y_min) * 0.25
         ax.set_ylim(max(0, y_min - y_pad * 0.5), y_max + y_pad)
-
         ax.set_xticks(x)
         ax.set_xticklabels(all_labels, fontsize=9)
         ax.set_title(m_label, fontweight="bold")
@@ -518,40 +459,52 @@ def plot_clean_vs_noisy(df: pd.DataFrame):
         ax.spines[["top", "right"]].set_visible(False)
 
     print("═" * 80 + "\n")
-
-    fig.savefig(PLOT_DIR / "clean_vs_noisy_significance.png", dpi=150)
+    fig.savefig(plot_dir / "clean_vs_noisy_significance.png", dpi=150)
     plt.close(fig)
-    print(f"  Saved: {PLOT_DIR / 'clean_vs_noisy_significance.png'}")
+    print(f"  Saved: {plot_dir / 'clean_vs_noisy_significance.png'}")
 
 
-# ── main ───────────────────────────────────────────────────────────────────────
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--noise_type",
+        choices=["standard_idn", "normalized_idn", "feature_driven_idn"],
+        required=True,
+        help="Noise type to analyse",
+    )
+    args = parser.parse_args()
 
-def main():
-    print(f"\nResults root : {RESULTS_ROOT}")
-    print(f"Plots output : {PLOT_DIR}\n")
+    noise_label  = NOISE_TYPE_LABELS[args.noise_type]
+    results_root = (
+        project_root() / "results" / "HAM10000" / "baseline" / args.noise_type
+    )
+    plot_dir = results_root / "plots"
+    plot_dir.mkdir(parents=True, exist_ok=True)
 
-    print("Loading data …")
-    records, training = collect_data()
+    print(f"\nNoise type   : {noise_label}")
+    print(f"Results root : {results_root}")
+    print(f"Plots output : {plot_dir}\n")
+
+    records, training = collect_data(results_root)
 
     if not records:
-        print("ERROR: No data found. Check RESULTS_ROOT path.")
+        print(f"No data found under {results_root}. Check that results have been pulled.")
         return
 
     df = pd.DataFrame(records)
     print(f"  Loaded {len(df)} fold-records across "
           f"{df['tau'].nunique()} noise level(s): {df['tau'].unique().tolist()}\n")
 
-    print("Generating outputs …")
-    print_summary_table(df)
-    plot_metrics_vs_tau(df)
-    plot_perclass_f1_heatmap(df)
-    plot_training_curves(training)
-    plot_confusion_matrices(df)
-    plot_fold_scatter(df)
-    plot_clean_vs_noisy(df)
-    save_csv(df)
+    print_summary_table(df, noise_label)
+    plot_metrics_vs_tau(df, noise_label, plot_dir)
+    plot_perclass_f1_heatmap(df, noise_label, plot_dir)
+    plot_training_curves(training, noise_label, plot_dir)
+    plot_confusion_matrices(df, noise_label, plot_dir)
+    plot_fold_scatter(df, noise_label, plot_dir)
+    plot_clean_vs_noisy(df, noise_label, plot_dir)
+    save_csv(df, plot_dir)
 
-    print(f"\nAll done! Plots saved to: {PLOT_DIR}\n")
+    print(f"\nAll done! Plots saved to: {plot_dir}\n")
 
 
 if __name__ == "__main__":
