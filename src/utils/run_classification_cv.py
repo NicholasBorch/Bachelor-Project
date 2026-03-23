@@ -18,6 +18,7 @@ from src.common.io import project_root
 from src.common.logging import make_output_dir
 from src.common.seed import seed_everything
 from src.methods.baseline import run_baseline_fold
+from src.methods.asyco import run_asyco_fold
 from configs.classification_default import (
     SEED,
     FOLDS,
@@ -34,7 +35,7 @@ METHOD_REGISTRY = {
     "baseline": run_baseline_fold,
     # "elr":   run_elr_fold,
     # "sce":   run_sce_fold,
-    # "asyco": run_asyco_fold,
+    "asyco": run_asyco_fold,
 }
 
 NOISE_TYPE_TO_CV_DIR = {

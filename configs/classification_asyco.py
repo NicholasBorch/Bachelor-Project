@@ -1,29 +1,6 @@
-# THIS IS EXAMPLE DRAFT
+# Hyperparameters for AsyCo classification experiments.
 
-# Cross-validation
-N_FOLDS = 10
-SEED = 42
-
-# Dataset
-DATASET = "HAM10000"
-
-# Noise
-NOISE_TYPE = "idn"
-NOISE_RATE = 0.2
-
-# Method
-METHOD = "baseline"
-
-# Model
-MODEL_NAME = "resnet18"
-IMAGE_SIZE = 224
-
-# Training
-BATCH_SIZE = 64
-LR = 1e-3
-EPOCHS = 50
-WEIGHT_DECAY = 1e-4
-
-# Dropout / MC dropout
-USE_MC_DROPOUT = False
-MC_SAMPLES = 10
+WARMUP_EPOCHS = 10    # epochs of full supervised training before selection begins
+K_TOPLABEL    = 2     # number of top-ranked labels for reference net prediction
+LAMBDA_U      = 25.0  # weight of unsupervised consistency loss on noisy samples
+TEMPERATURE   = 0.5   # sharpening temperature for pseudo-labels
