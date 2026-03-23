@@ -20,6 +20,7 @@ from src.common.seed import seed_everything
 from src.methods.baseline import run_baseline_fold
 from src.methods.asyco import run_asyco_fold
 from src.methods.sce import run_sce_fold
+from src.methods.elr import run_elr_fold
 from configs.classification_default import (
     SEED,
     FOLDS,
@@ -34,7 +35,7 @@ from configs.classification_default import (
 
 METHOD_REGISTRY = {
     "baseline": run_baseline_fold,
-    # "elr":   run_elr_fold,
+    "elr":   run_elr_fold,
     "sce":   run_sce_fold,
     "asyco": run_asyco_fold,
 }
