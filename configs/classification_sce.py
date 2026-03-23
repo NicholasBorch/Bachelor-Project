@@ -1,29 +1,8 @@
-# THIS IS EXAMPLE DRAFT
+# configs/classification_sce.py
+# SCE-specific hyperparameters only.
+# All shared parameters (epochs, lr, batch_size etc.)
+# are defined in classification_default.py.
 
-# Cross-validation
-N_FOLDS = 10
-SEED = 42
-
-# Dataset
-DATASET = "HAM10000"
-
-# Noise
-NOISE_TYPE = "idn"
-NOISE_RATE = 0.2
-
-# Method
-METHOD = "baseline"
-
-# Model
-MODEL_NAME = "resnet18"
-IMAGE_SIZE = 224
-
-# Training
-BATCH_SIZE = 64
-LR = 1e-3
-EPOCHS = 50
-WEIGHT_DECAY = 1e-4
-
-# Dropout / MC dropout
-USE_MC_DROPOUT = False
-MC_SAMPLES = 10
+SCE_ALPHA: float = 0.1
+SCE_BETA:  float = 1.0
+SCE_A:     float = -4.0
