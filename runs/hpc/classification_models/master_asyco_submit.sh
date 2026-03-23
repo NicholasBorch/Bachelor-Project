@@ -12,7 +12,7 @@ set -euo pipefail
 cd $HOME/projects/Bachelor-Project
 mkdir -p logs/classification_models
 
-NOISE_TYPES=("standard_idn" "normalized_idn" "feature_driven_idn")
+NOISE_TYPES=("normalized_idn" "feature_driven_idn")
 SCRIPT="runs/hpc/classification_models/submit_asyco.sh"
 
 echo "============================================"
