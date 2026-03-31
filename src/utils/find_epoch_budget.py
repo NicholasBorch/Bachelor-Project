@@ -4,7 +4,7 @@
 # Loads the clean training split directly from cv_normalized/clean/fold_XX/
 # to guarantee identical fold assignments as the main classification pipeline.
 # Carves a stratified 15% validation split from train_clean.csv, then trains
-# a clean Baseline tracking both loss and balanced accuracy per epoch.
+# a clean Baseline tracking loss, balanced accuracy, and macro F1 per epoch.
 #
 # Designed to run as a parallel HPC job — submit one job per fold.
 # After all 10 fold jobs complete, run aggregate_epoch_budget.py locally.
@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from sklearn.metrics import balanced_accuracy_score
+from sklearn.metrics import balanced_accuracy_score, f1_score
 from sklearn.model_selection import StratifiedShuffleSplit
 from torch.utils.data import DataLoader
 
@@ -52,8 +52,8 @@ def evaluate(
     loader: DataLoader,
     criterion: nn.Module,
     device: torch.device,
-) -> tuple[float, float]:
-    """Returns (mean_loss, balanced_accuracy) on the given loader."""
+) -> tuple[float, float, float]:
+    """Returns (mean_loss, balanced_accuracy, macro_f1) on the given loader."""
     model.eval()
     total_loss, total_samples = 0.0, 0
     all_true, all_pred = [], []
@@ -70,7 +70,8 @@ def evaluate(
 
     mean_loss = total_loss / max(total_samples, 1)
     bal_acc   = float(balanced_accuracy_score(all_true, all_pred))
-    return mean_loss, bal_acc
+    macro_f1  = float(f1_score(all_true, all_pred, average="macro", zero_division=0))
+    return mean_loss, bal_acc, macro_f1
 
 
 def run_fold(
@@ -83,12 +84,12 @@ def run_fold(
     seed_everything(SEED * 10_000 + fold_id)
 
     # ── Load clean fold data from cv_normalized (same splits as main pipeline)
-    root      = project_root()
-    fold_dir  = (root / "data" / "processed" / "HAM10000"
-                 / "cv_normalized" / "clean" / f"fold_{fold_id:02d}")
+    root       = project_root()
+    fold_dir   = (root / "data" / "processed" / "HAM10000"
+                  / "cv_normalized" / "clean" / f"fold_{fold_id:02d}")
     train_path = fold_dir / "train_clean.csv"
-    test_path  = fold_dir / "test_clean.csv"
-    images_dir = root / "data" / "processed" / "HAM10000" / "one_image_per_lesion" / "images"
+    images_dir = (root / "data" / "processed" / "HAM10000"
+                  / "one_image_per_lesion" / "images")
 
     if not train_path.exists():
         raise FileNotFoundError(
@@ -97,16 +98,17 @@ def run_fold(
         )
 
     train_df = pd.read_csv(train_path)
-    test_df  = pd.read_csv(test_path)
 
-    # Use dx_clean so we are always training on clean labels
-    train_df["dx"] = train_df["dx_clean"] if "dx_clean" in train_df.columns else train_df["dx"]
+    # Use dx_clean if present, otherwise dx (both are clean at tau=0.0)
+    if "dx_clean" in train_df.columns:
+        train_df["dx"] = train_df["dx_clean"]
 
-    all_labels  = pd.concat([train_df["dx"], test_df["dx"]]).tolist()
+    # Build label mapping from training data only — consistent with main pipeline
+    all_labels  = train_df["dx"].tolist()
     c2i, _      = class_mapping(all_labels)
     num_classes = len(c2i)
 
-    # ── Stratified val split from training data ────────────────────────────
+    # ── Stratified val split ───────────────────────────────────────────────
     splitter = StratifiedShuffleSplit(
         n_splits=1, test_size=val_frac, random_state=SEED * 10_000 + fold_id
     )
@@ -115,8 +117,7 @@ def run_fold(
     train_sub = train_df.iloc[train_idx].reset_index(drop=True)
     val_sub   = train_df.iloc[val_idx].reset_index(drop=True)
 
-    print(f"\nFold {fold_id} | train={len(train_sub)} | val={len(val_sub)} "
-          f"| test={len(test_df)}")
+    print(f"\nFold {fold_id} | train={len(train_sub)} | val={len(val_sub)}")
 
     # ── Datasets and loaders ───────────────────────────────────────────────
     train_labels_int = [c2i[str(dx)] for dx in train_sub["dx"]]
@@ -157,23 +158,29 @@ def run_fold(
     # ── Training loop ──────────────────────────────────────────────────────
     records = []
     for epoch in range(1, epochs + 1):
-        train_loss              = train_one_epoch(model, train_loader, criterion, optimiser, device)
-        val_loss, val_bal_acc   = evaluate(model, val_loader, criterion, device)
+        train_loss                          = train_one_epoch(
+            model, train_loader, criterion, optimiser, device
+        )
+        val_loss, val_bal_acc, val_macro_f1 = evaluate(
+            model, val_loader, criterion, device
+        )
         scheduler.step()
 
         records.append({
-            "fold":        fold_id,
-            "epoch":       epoch,
-            "train_loss":  train_loss,
-            "val_loss":    val_loss,
-            "val_bal_acc": val_bal_acc,
+            "fold":         fold_id,
+            "epoch":        epoch,
+            "train_loss":   train_loss,
+            "val_loss":     val_loss,
+            "val_bal_acc":  val_bal_acc,
+            "val_macro_f1": val_macro_f1,
         })
 
         if epoch % 10 == 0 or epoch == 1:
             print(f"    Epoch {epoch:03d}/{epochs} | "
                   f"train_loss={train_loss:.4f} | "
                   f"val_loss={val_loss:.4f} | "
-                  f"val_bal_acc={val_bal_acc:.4f}")
+                  f"val_bal_acc={val_bal_acc:.4f} | "
+                  f"val_macro_f1={val_macro_f1:.4f}")
 
     # ── Save — always overwrite ────────────────────────────────────────────
     out_path = out_dir / f"fold_{fold_id:02d}_curves.csv"
