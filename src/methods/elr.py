@@ -8,6 +8,12 @@
 #   1. Loss is ELRLoss instead of CrossEntropyLoss
 #   2. Training loop passes sample indices to the loss for target updates
 #   3. dataset.py returns integer sample index as third element (used here)
+#
+# Note: ELR requires sample indices to update the per-sample target buffer,
+# so it cannot use train_one_epoch from train.py (which calls
+# criterion(logits, labels) without indices). The inline loop below
+# mirrors train_one_epoch exactly, with the only difference being the
+# criterion call signature: criterion(index, logits, labels).
 
 from __future__ import annotations
 
@@ -146,10 +152,16 @@ def run_elr_fold(
     print(f"    Epochs        : {epochs}")
 
     # ── Training loop ──────────────────────────────────────────────────────
+    # Mirrors train_one_epoch exactly. The only structural difference is the
+    # criterion call: criterion(index, logits, labels) instead of
+    # criterion(logits, labels). This is necessary because ELR's target
+    # buffer is indexed by sample position.
+    #
+    # Denominator uses len(loader.dataset) to match train_one_epoch exactly,
+    # eliminating any reporting discrepancy from accumulated batch sizes.
     for epoch in range(epochs):
         model.train()
         total_loss = 0.0
-        n = 0
 
         for x, y, idx in train_loader:
             x   = x.to(device)
@@ -163,9 +175,8 @@ def run_elr_fold(
             optimiser.step()
 
             total_loss += loss.item() * x.size(0)
-            n += x.size(0)
 
-        train_loss = total_loss / n
+        train_loss = total_loss / len(train_loader.dataset)
         scheduler.step()
         logger.log_epoch(epoch + 1, train_loss)
         print(f"    Epoch {epoch+1:03d}/{epochs} | train_loss={train_loss:.4f}")

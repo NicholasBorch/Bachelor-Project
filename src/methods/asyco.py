@@ -3,6 +3,21 @@
 # Asymmetric Co-teaching (AsyCo) for HAM10000 classification.
 # Implements Liu et al. (2023) "Asymmetric Co-teaching with Multi-view
 # Consensus for Noisy Label Learning".
+#
+# Fixes applied relative to the original implementation:
+#
+#   1. BatchNorm running statistics are frozen during subset forward passes
+#      in asyco_epoch. Without this, each subset pass (clean-only, noisy-only)
+#      corrupts the running mean/variance with biased subset statistics,
+#      degrading test-time performance — especially for the majority class.
+#
+#   2. The double forward pass for noisy pseudo-labels is consolidated into
+#      a single pass that computes both the pseudo-label (detached) and the
+#      predictions for the consistency loss from the same logits.
+#
+#   3. Warmup ratio is controlled via configs/classification_asyco.py.
+#      With a 25-epoch budget, warmup must be short (3-5 epochs) to give
+#      the selection mechanism sufficient post-warmup training time.
 
 from __future__ import annotations
 
@@ -34,6 +49,27 @@ from configs.classification_asyco import (
     LAMBDA_U,
     TEMPERATURE,
 )
+
+
+# ── BatchNorm stat freezing utilities ─────────────────────────────────────
+# These allow subset forward passes without corrupting the running mean and
+# variance that will be used at test time. Setting momentum=0 makes the
+# running stats ignore the current batch entirely. The model still uses
+# per-batch statistics for normalisation during training (train mode), so
+# gradients are unaffected — only the running buffer update is suppressed.
+
+def freeze_bn_running_stats(model: nn.Module) -> None:
+    """Set momentum=0 on all BN layers to prevent running stat updates."""
+    for m in model.modules():
+        if isinstance(m, (nn.BatchNorm1d, nn.BatchNorm2d)):
+            m.momentum = 0
+
+
+def restore_bn_running_stats(model: nn.Module, momentum: float = 0.1) -> None:
+    """Restore default momentum on all BN layers."""
+    for m in model.modules():
+        if isinstance(m, (nn.BatchNorm1d, nn.BatchNorm2d)):
+            m.momentum = momentum
 
 
 def sharpen(probs: torch.Tensor, T: float) -> torch.Tensor:
@@ -154,6 +190,9 @@ def asyco_epoch(
         x, y = x.to(device), y.to(device)
         b    = x.size(0)
 
+        # ── Step 1: Full-batch inference for sample selection ─────────
+        # Both networks run on the full batch under no_grad.
+        # BN running stats update here is fine — this is a full batch.
         with torch.no_grad():
             logits_n = clf_net(x)
             logits_r = ref_net(x)
@@ -171,26 +210,49 @@ def asyco_epoch(
         clean_mask = w == 1
         noisy_mask = w == 0
 
+        # ── Step 2: Train clf_net on selected subsets ─────────────────
+        # CRITICAL: Freeze BN running stats before subset forward passes.
+        # Without this, passing only clean or only noisy subsets through
+        # the network updates the running mean/variance with biased
+        # statistics (e.g., a batch of only minority-class samples).
+        # Over many iterations this corrupts the BN state used at test
+        # time, causing systematic prediction failures.
+        #
+        # Setting momentum=0 prevents running stat updates while still
+        # using per-batch statistics for normalisation (gradients are
+        # unaffected — only the persistent buffer is protected).
         clf_optimiser.zero_grad()
         loss_clf = torch.tensor(0.0, device=device)
+        has_clf_loss = False
+
+        freeze_bn_running_stats(clf_net)
 
         if clean_mask.sum() > 0:
-            loss_clf = loss_clf + clf_criterion(clf_net(x[clean_mask]), y[clean_mask])
+            logits_clean = clf_net(x[clean_mask])
+            loss_clf = loss_clf + clf_criterion(logits_clean, y[clean_mask])
+            has_clf_loss = True
 
         if noisy_mask.sum() > 0:
-            with torch.no_grad():
-                pseudo_label = sharpen(
-                    torch.softmax(clf_net(x[noisy_mask]), dim=1), temperature
-                ).detach()
-            probs_noisy2 = torch.softmax(clf_net(x[noisy_mask]), dim=1)
-            loss_clf     = loss_clf + lambda_u * F.mse_loss(probs_noisy2, pseudo_label)
+            # Single forward pass for both pseudo-label and loss.
+            # Previously this was two separate passes — wasteful and
+            # causing double BN corruption on the noisy subset.
+            logits_noisy = clf_net(x[noisy_mask])
+            probs_noisy  = torch.softmax(logits_noisy, dim=1)
+            pseudo_label = sharpen(probs_noisy, temperature).detach()
+            loss_clf     = loss_clf + lambda_u * F.mse_loss(probs_noisy, pseudo_label)
+            has_clf_loss = True
 
-        if (clean_mask.sum() + noisy_mask.sum()) > 0:
+        restore_bn_running_stats(clf_net)
+
+        if has_clf_loss:
             loss_clf.backward()
             clf_optimiser.step()
             clf_total += loss_clf.item() * b
             n_clf     += b
 
+        # ── Step 3: Train ref_net on relabeled data ───────────────────
+        # ref_net always trains on the full batch with relabeled targets,
+        # so BN stats are fine here — no subsetting.
         ref_optimiser.zero_grad()
         loss_ref = F.binary_cross_entropy_with_logits(ref_net(x), y_hat)
         loss_ref.backward()
