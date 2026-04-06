@@ -19,6 +19,6 @@ NUM_WORKERS = 2
 PIN_MEMORY = True
 
 # Training
-EPOCHS         = 25
+EPOCHS         = 50
 LR             = 1e-4
 BACKBONE_DEPTH = 50

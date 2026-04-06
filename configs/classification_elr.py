@@ -8,7 +8,7 @@
 #
 # Values follow the Clothing1M setup (pretrained ResNet-50, similar to ours):
 #   beta   = 0.7  temporal ensembling momentum
-#   lambda = 0.5  regularisation coefficient
+#   lambda = 1.0  regularisation coefficient
 
 ELR_BETA:   float = 0.7
-ELR_LAMBDA: float = 0.5
+ELR_LAMBDA: float = 1.0
