@@ -28,6 +28,8 @@ from src.common.logging import ResultsLogger, RunConfig, make_output_dir
 from src.common.metrics import compute_metrics, print_metrics
 from src.common.seed import seed_everything
 
+from configs.classification_default import PIN_MEMORY
+
 
 def run_baseline_fold(
     train_noisy_df: pd.DataFrame,
@@ -46,6 +48,7 @@ def run_baseline_fold(
     lr: float = 1e-4,
     num_workers: int = 2,
     device: Optional[torch.device] = None,
+    use_weighted_sampler: bool = True,
 ) -> dict:
     # Trains baseline for a fixed number of epochs on one noisy training fold
     # and evaluates once on the clean test fold after the final epoch.
@@ -69,19 +72,25 @@ def run_baseline_fold(
         test_clean_df, images_dir, c2i, get_transforms(image_size, augment=False)
     )
 
+    sampler = make_weighted_sampler(train_labels) if use_weighted_sampler else None
     train_loader = DataLoader(
         train_ds,
         batch_size=batch_size,
-        sampler=make_weighted_sampler(train_labels),
+        sampler=sampler,
+        shuffle=(sampler is None),   # shuffle=True only when no sampler — DataLoader
+                                     # raises an error if both sampler and shuffle=True
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=PIN_MEMORY,
     )
+
+    print(f"    Sampler: {'weighted (replacement=True)' if use_weighted_sampler else 'shuffle=True (no sampler)'}")
+
     test_loader = DataLoader(
         test_ds,
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=PIN_MEMORY,
     )
 
     model     = build_resnet(num_classes=num_classes, pretrained=True, depth=backbone_depth).to(device)
