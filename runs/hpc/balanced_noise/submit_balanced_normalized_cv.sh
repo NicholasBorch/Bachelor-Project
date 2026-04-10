@@ -1,5 +1,5 @@
 #!/bin/bash
-#BSUB -q hpc
+#BSUB -q gpuv100
 #BSUB -n 4
 #BSUB -R "rusage[mem=8000]"
 #BSUB -W 00:15
