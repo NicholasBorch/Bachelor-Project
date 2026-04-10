@@ -7,6 +7,10 @@
 #   python -m src.utils.analyze_idn --method standard
 #   python -m src.utils.analyze_idn --method normalized
 #   python -m src.utils.analyze_idn --method feature_driven
+#   python -m src.utils.analyze_idn --method feature_driven_v2
+#   python -m src.utils.analyze_idn --method balanced_normalized
+#   python -m src.utils.analyze_idn --method balanced_feature_driven
+#   python -m src.utils.analyze_idn --method balanced_standard
 
 from __future__ import annotations
 
@@ -30,11 +34,19 @@ METHOD_ROOTS = {
     "standard":       "cv_standard",
     "normalized":     "cv_normalized",
     "feature_driven": "cv_feature_driven",
+    "feature_driven_v2": "cv_feature_driven_v2",
+    "balanced_normalized": "cv_balanced_normalized",
+    "balanced_feature_driven": "cv_balanced_feature_driven",
+    "balanced_standard": "cv_balanced_standard",
 }
 METHOD_LABELS = {
     "standard":       "Standard IDN",
     "normalized":     "Normalised IDN",
     "feature_driven": "Feature-Driven IDN",
+    "feature_driven_v2": "Feature-Driven IDN v2",
+    "balanced_normalized": "Balanced Normalised IDN",
+    "balanced_feature_driven": "Balanced Feature-Driven IDN",
+    "balanced_standard": "Balanced Standard IDN",
 }
 
 
@@ -220,7 +232,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--method",
-        choices=["standard", "normalized", "feature_driven"],
+        choices=["standard", "normalized", "feature_driven", "feature_driven_v2", "balanced_normalized", "balanced_feature_driven", "balanced_standard"],
         required=True,
         help="Which noise method to analyse",
     )

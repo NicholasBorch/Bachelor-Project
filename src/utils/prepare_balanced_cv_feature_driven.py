@@ -13,12 +13,14 @@ Usage (one job per fold on HPC, or all sequentially):
 
 Output:
     data/processed/HAM10000/cv_balanced_feature_driven/
-    ├── clean/fold_00/{train_noisy.csv, test_clean.csv}
-    ├── idn_tau05/fold_00/{train_noisy.csv, test_clean.csv}
-    └── idn_tau30/fold_09/{train_noisy.csv, test_clean.csv}
+    ├── clean/fold_00/{train_noisy.csv, test_clean.csv, noise_report.json}
+    ├── idn_tau05/fold_00/{train_noisy.csv, test_clean.csv, noise_report.json}
+    └── idn_tau30/fold_09/{train_noisy.csv, test_clean.csv, noise_report.json}
 """
 
 import argparse
+import json
+from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +29,7 @@ from sklearn.model_selection import StratifiedKFold
 
 from src.common.io import project_root
 from src.common.seed import seed_everything
+from src.classification.noise_idn import NoiseReport
 from src.classification.noise_idn_feature_driven import generate_feature_driven_noisy_labels
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -48,6 +51,28 @@ def _tau_tag(tau: float) -> str:
     if tau == 0.0:
         return "clean"
     return f"idn_tau{int(round(tau * 100)):02d}"
+
+
+def _make_clean_report(train_df: pd.DataFrame, num_classes: int) -> NoiseReport:
+    """Build a NoiseReport for the tau=0.0 (clean) case so every fold/tau dir
+    has a noise_report.json with the same schema."""
+    counts = train_df["dx"].value_counts().to_dict()
+    return NoiseReport(
+        seed=0,
+        tau=0.0,
+        norm_std=float(NORM_STD),
+        normalize=False,
+        num_classes=int(num_classes),
+        feature_size=0,
+        n_train=int(len(train_df)),
+        n_flipped=0,
+        class_counts_clean=counts,
+        class_counts_noisy=counts,
+        flip_confusion={},
+        flip_rate_min=0.0,
+        flip_rate_median=0.0,
+        flip_rate_max=0.0,
+    )
 
 
 def prepare_fold(
@@ -75,7 +100,8 @@ def prepare_fold(
         noise_seed = SEED * 10_000 + fold_id
 
         if tau == 0.0:
-            train_noisy = train_df.copy()
+            train_noisy   = train_df.copy()
+            noise_report  = _make_clean_report(train_df, num_classes=len(CLASS_NAMES))
         else:
             df_corrupted, noise_report = generate_feature_driven_noisy_labels(
                 df=train_df[["image_id", "lesion_id", "dx"]].copy(),
@@ -101,6 +127,8 @@ def prepare_fold(
         test_df[["image_id", "lesion_id", "dx"]].to_csv(
             out_dir / "test_clean.csv", index=False
         )
+        with open(out_dir / "noise_report.json", "w", encoding="utf-8") as f:
+            json.dump(asdict(noise_report), f, indent=2)
 
     print(f"  {fold_tag} done.")
 
