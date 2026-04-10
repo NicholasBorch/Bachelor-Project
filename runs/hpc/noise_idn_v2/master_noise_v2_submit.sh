@@ -1,45 +1,50 @@
 #!/bin/bash
 # runs/hpc/noise_idn_v2/master_noise_v2_submit.sh
 #
-# Submits feature-driven IDN v2 (argmax variant) fold CSV generation
-# for the full imbalanced dataset.
+# Feature-driven IDN v2 (argmax variant) — standalone submission.
 #
-# Requires fold_probs/fold_probs_full.npy to already exist from the
-# original noise preparation pipeline (master_noise_submit.sh).
-# No new OOF collection is needed — v2 reuses the same OOF probs as v1.
-#
-# Usage:
-#   bash runs/hpc/noise_idn_v2/master_noise_v2_submit.sh
+# Reuses data/processed/HAM10000/fold_probs/fold_probs_full.npy from the
+# original master_noise_submit.sh pipeline. No prob collection or merge
+# is re-run. Only the 10 feature-driven v2 fold prep jobs are submitted.
 
 set -euo pipefail
-cd ~/projects/Bachelor-Project
+cd $HOME/projects/Bachelor-Project
+mkdir -p logs
 
-SCRIPTS_DIR="runs/hpc/noise_idn_v2"
-mkdir -p "${SCRIPTS_DIR}/logs"
+echo "============================================"
+echo "  Noise Preparation v2 — Feature-Driven (argmax)"
+echo "============================================"
 
-# Check that OOF probs exist
 PROBS_FILE="data/processed/HAM10000/fold_probs/fold_probs_full.npy"
-if [ ! -f "${PROBS_FILE}" ]; then
-    echo "ERROR: OOF probs not found at ${PROBS_FILE}"
-    echo "Run the original noise preparation pipeline first:"
-    echo "  bash runs/hpc/noise_idn/master_noise_submit.sh"
-    echo "  (wait for completion, then re-run this script)"
+if [ ! -f "$PROBS_FILE" ]; then
+    echo "ERROR: $PROBS_FILE not found."
+    echo "Run runs/hpc/noise_idn/master_noise_submit.sh first to produce fold probs."
     exit 1
 fi
+echo "Found existing fold probs: $PROBS_FILE"
 
-echo "============================================"
-echo "  Feature-Driven IDN v2 (Argmax Variant)"
-echo "  Dataset: full imbalanced (7,470 samples)"
-echo "  OOF probs: ${PROBS_FILE}"
-echo "============================================"
-
-JID=$(bsub < "${SCRIPTS_DIR}/submit_feature_driven_v2.sh" \
-    | grep -oP '(?<=Job <)\d+')
-echo "  Submitted v2 fold generation — array JID=${JID}"
-
+# ── Feature-driven IDN v2 (10 folds) ──────────────────────────────────────────
 echo ""
-echo "Monitor with: bjobs -u \$USER"
-echo "Logs: ${SCRIPTS_DIR}/logs/fd_v2_fold_*.out"
+echo "Submitting feature-driven v2 (10 folds)..."
+FD2_JOBIDS=()
+for FOLD in $(seq 0 9); do
+    JOBID=$(sed "s/--fold \$FOLD/--fold ${FOLD}/" runs/hpc/noise_idn_v2/submit_feature_driven_v2_cv.sh \
+        | bsub \
+            -J "cvfd2${FOLD}" \
+            -oo logs/cvfd2_${FOLD}.out \
+            -eo logs/cvfd2_${FOLD}.err \
+        | awk '{print $2}' | tr -d '<>')
+    FD2_JOBIDS+=($JOBID)
+    echo "  Fold $FOLD → job $JOBID"
+done
+
+# ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
-echo "After completion, run analysis locally:"
-echo "  python -m src.utils.analyze_idn_v2"
+echo "============================================"
+echo "  All jobs submitted. Monitor with: bjobs"
+echo "============================================"
+echo "  Feature-driven v2 jobs : ${FD2_JOBIDS[@]}"
+echo ""
+echo "  Logs: logs/cvfd2_*.out"
+echo ""
+echo "  Output: data/processed/HAM10000/cv_feature_driven_v2/"

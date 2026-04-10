@@ -1,21 +1,26 @@
 # src/classification/noise_idn_feature_driven_v2.py
+# Feature-driven IDN v2 — argmax variant.
 #
-# Feature-driven IDN (argmax variant) for label corruption.
+# Identical to noise_idn_feature_driven.py except for the flip-target rule:
 #
-# Drop-in alternative to noise_idn_feature_driven.py with one change:
+#   v1 (noise_idn_feature_driven.py):
+#       For each sample, flip with per-instance probability q = flip_rate[i],
+#       and when a flip occurs, draw the new label by multinomial sampling
+#       from the masked-and-renormalised OOF softmax distribution.
 #
-#   v1 (softmax sampling): when a sample flips, the target class is SAMPLED
-#       from the renormalized OOF softmax distribution over non-true classes.
-#       Different samples from the same class can flip to different targets.
+#   v2 (this file):
+#       Flip decision is still stochastic (Bernoulli with prob q = flip_rate[i]),
+#       but when a flip occurs, the new label is *deterministic*: the argmax
+#       over the masked-and-renormalised OOF softmax distribution (i.e. the
+#       wrong class the reference model considers most visually similar).
 #
-#   v2 (argmax):           when a sample flips, the target class is the ARGMAX
-#       of the OOF softmax over non-true classes — always the single most
-#       probable incorrect class. This produces deterministic, concentrated
-#       flips where every flipped sample within a visual-confusion cluster
-#       goes to the same target.
+# Everything else — truncated-normal flip rate sampling, masking of the true
+# class, renormalisation, reproducibility — is identical to v1.
 #
-# Everything else is identical: truncated normal flip rate draw, τ
-# parameterization, seed handling, output format, and function signature.
+# OOF probability collection is still handled by the existing scripts:
+#   src/utils/collect_fold_probs.py   (one job per fold)
+#   src/utils/merge_fold_probs.py     (assembles per-fold files into one array)
+# v2 reuses fold_probs_full.npy produced by those scripts — no recollection.
 
 from __future__ import annotations
 
@@ -24,6 +29,8 @@ from typing import Dict, Tuple
 import numpy as np
 import pandas as pd
 from scipy import stats
+
+import torch
 
 from src.common.io import class_mapping
 from src.classification.noise_idn import NoiseReport
@@ -38,11 +45,12 @@ def generate_feature_driven_noisy_labels_v2(
     norm_std: float = 0.1,
 ) -> Tuple[pd.DataFrame, NoiseReport]:
     """
-    Applies feature-driven IDN corruption (argmax variant).
+    Applies feature-driven IDN v2 corruption using pre-computed OOF softmax probs.
 
-    For each sample, the flip decision is stochastic (Bernoulli with rate q_i),
-    but the flip TARGET is deterministic: always the single most-probable
-    non-true class according to the OOF softmax probabilities.
+    Flip decision: Bernoulli(flip_rate[i]) per instance, with flip_rate drawn
+    from a truncated normal centred on tau (same as v1).
+    Flip target: argmax over masked-and-renormalised OOF probs (the most
+    visually-confusable wrong class, per the reference model).
 
     Parameters
     ----------
@@ -51,7 +59,6 @@ def generate_feature_driven_noisy_labels_v2(
     tau       : Target flip rate (centre of truncated normal)
     seed      : RNG seed for reproducibility
     oof_probs : (N, C) array of softmax probabilities; row i corresponds to df row i
-    norm_std  : Std of truncated normal for per-instance flip rates
     """
     df = df.copy().reset_index(drop=True)
     df["image_id"]  = df["image_id"].astype(str)
@@ -77,7 +84,11 @@ def generate_feature_driven_noisy_labels_v2(
             flip_rate_median=0.0, flip_rate_max=0.0,
         )
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     np.random.seed(int(seed))
+    torch.manual_seed(int(seed))
+    torch.cuda.manual_seed(int(seed))
 
     # ── Sample per-instance flip rates from truncated normal centred on tau
     flip_dist = stats.truncnorm(
@@ -87,37 +98,34 @@ def generate_feature_driven_noisy_labels_v2(
     )
     flip_rate = flip_dist.rvs(n).astype(np.float32)
 
-    # ── Determine per-sample argmax flip target ───────────────────────────
-    # Copy OOF probs, zero out the true class, take argmax over remaining
-    probs = oof_probs.copy()  # (N, C)
-    labels = np.array([c2i[dx] for dx in df["dx"]], dtype=np.int64)
+    # ── Mask true class from OOF probs, renormalise over wrong classes ────
+    probs  = torch.from_numpy(oof_probs).float().to(device)
+    labels = torch.tensor(
+        [c2i[dx] for dx in df["dx"]], dtype=torch.long, device=device
+    )
 
-    # Zero out true class so argmax selects from non-true classes only
-    probs[np.arange(n), labels] = 0.0
+    probs[torch.arange(n, device=device), labels] = 0.0
+    probs = probs / (probs.sum(dim=1, keepdim=True) + 1e-8)
 
-    # Argmax over non-true classes — deterministic flip target per sample
-    argmax_targets = probs.argmax(axis=1)  # (N,)
+    # ── v2: deterministic flip target = argmax over masked probs ──────────
+    argmax_targets = probs.argmax(dim=1).cpu().numpy().astype(np.int64)
+    labels_cpu     = labels.cpu().numpy().astype(np.int64)
 
-    # ── Stochastic flip decision (Bernoulli with rate q_i) ────────────────
-    # Draw uniform [0, 1) for each sample; flip if draw < q_i
-    flip_coin = np.random.uniform(0.0, 1.0, size=n).astype(np.float32)
-    flipped = flip_coin < flip_rate  # boolean mask
+    # ── Bernoulli flip decision per instance ──────────────────────────────
+    u = np.random.rand(n).astype(np.float32)
+    flip_mask = u < flip_rate  # True → flip to argmax_targets[i]
 
-    # Assemble new labels: keep original if not flipped, use argmax target if flipped
-    new_label_idx = labels.copy()
-    new_label_idx[flipped] = argmax_targets[flipped]
+    new_label_idx = np.where(flip_mask, argmax_targets, labels_cpu).astype(np.int64)
 
-    # ── Build flip confusion dict ─────────────────────────────────────────
+    # ── Build flip confusion matrix ───────────────────────────────────────
     flip_confusion: Dict[str, Dict[str, int]] = {}
-    for yi, ytilde in zip(labels, new_label_idx):
+    for yi, ytilde in zip(labels_cpu, new_label_idx):
         if ytilde == yi:
             continue
         true_str  = i2c[int(yi)]
         noisy_str = i2c[int(ytilde)]
         flip_confusion.setdefault(true_str, {})
-        flip_confusion[true_str][noisy_str] = (
-            flip_confusion[true_str].get(noisy_str, 0) + 1
-        )
+        flip_confusion[true_str][noisy_str] = flip_confusion[true_str].get(noisy_str, 0) + 1
 
     df_out = df.copy()
     df_out["dx_clean"] = df_out["dx"]
@@ -127,11 +135,11 @@ def generate_feature_driven_noisy_labels_v2(
         seed=int(seed),
         tau=float(tau),
         norm_std=float(norm_std),
-        normalize=False,
+        normalize=False,   # not applicable for feature-driven
         num_classes=int(num_classes),
-        feature_size=0,
+        feature_size=0,    # not applicable for feature-driven
         n_train=int(n),
-        n_flipped=int(flipped.sum()),
+        n_flipped=int((df_out["dx_clean"] != df_out["dx_noisy"]).sum()),
         class_counts_clean=df_out["dx_clean"].value_counts().to_dict(),
         class_counts_noisy=df_out["dx_noisy"].value_counts().to_dict(),
         flip_confusion=flip_confusion,

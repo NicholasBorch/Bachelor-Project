@@ -1,25 +1,25 @@
-"""
-prepare_cv_feature_driven_v2.py
+# src/utils/prepare_classification_cv_feature_driven_v2.py
+#
+# Generates CV fold artifacts for ONE fold using feature-driven IDN v2
+# (argmax variant). Designed to run as a parallel HPC job — submit 10 jobs
+# each with --fold 0..9.
+#
+# Prerequisites:
+#   - data/processed/HAM10000/fold_probs/fold_probs_full.npy
+#     (already produced by the original master_noise_submit.sh pipeline —
+#      collect_fold_probs.py + merge_fold_probs.py)
+#
+# Usage (from repo root):
+#   python -m src.utils.prepare_classification_cv_feature_driven_v2 --fold 0
+#
+# Output structure:
+#   data/processed/HAM10000/cv_feature_driven_v2/
+#     fold_assignments.csv
+#     clean/fold_00/{train_clean,train_noisy,test_clean}.csv + noise_report.json
+#     idn_feature_tau05/fold_00/...
+#     ...
 
-Generates feature-driven IDN v2 (argmax variant) cross-validation fold CSVs
-for the FULL imbalanced HAM10000 dataset (7,470 samples).
-
-Uses the existing imbalanced OOF softmax probabilities
-(fold_probs/fold_probs_full.npy) and the same lesion-stratified fold
-assignments as the v1 feature-driven pipeline.
-
-Must be run AFTER merge_fold_probs.py has produced fold_probs_full.npy.
-
-Usage (one job per fold on HPC, or all sequentially):
-    python -m src.utils.prepare_cv_feature_driven_v2 --fold 0
-    python -m src.utils.prepare_cv_feature_driven_v2 --fold all
-
-Output:
-    data/processed/HAM10000/cv_feature_driven_v2/
-    ├── clean/fold_00/{train_noisy.csv, test_clean.csv}
-    ├── idn_feature_tau05/fold_00/{train_noisy.csv, test_clean.csv}
-    └── idn_feature_tau30/fold_09/{train_noisy.csv, test_clean.csv}
-"""
+from __future__ import annotations
 
 import argparse
 import json
@@ -42,12 +42,6 @@ from configs.classification_default import (
     NORM_STD,
 )
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
-ROOT       = project_root()
-METADATA   = ROOT / "data/processed/HAM10000/one_image_per_lesion/HAM10000_metadata_one_per_lesion.csv"
-PROBS_FILE = ROOT / "data/processed/HAM10000/fold_probs/fold_probs_full.npy"
-OUTPUT_DIR = ROOT / "data/processed/HAM10000/cv_feature_driven_v2"
-
 
 def process_fold(
     fold_id: int,
@@ -55,8 +49,6 @@ def process_fold(
     fold_probs_full: np.ndarray,
     out_root: Path,
 ) -> None:
-    """Generate v2 noisy fold CSVs for one fold of the full imbalanced dataset."""
-    # Use the same lesion-stratified folds as all other imbalanced experiments
     df_folds = make_folds_lesion_stratified(df, n_splits=FOLDS, seed=SEED)
 
     test_df       = df_folds[df_folds["fold"] == fold_id].copy().reset_index(drop=True)
@@ -64,7 +56,7 @@ def process_fold(
     train_df      = df_folds[train_mask].copy().reset_index(drop=True)
     train_indices = df_folds[train_mask].index.tolist()
 
-    # Slice OOF probs for training samples only — row i matches train_df row i
+    # Slice probs for training samples only — row i matches train_df row i
     fold_train_probs = fold_probs_full[train_indices]  # (N_train, C)
 
     print(f"\nFold {fold_id} | feature-driven v2 (argmax) | "
@@ -76,7 +68,6 @@ def process_fold(
         print(f"  Saved fold assignments: {assign_path}")
 
     for tau in NOISE_RATES:
-        # Use same folder naming as v1 feature-driven: idn_feature_tauXX
         folder_name = "clean" if tau == 0.0 else f"idn_feature_tau{int(tau * 100):02d}"
         fold_dir = out_root / folder_name / f"fold_{fold_id:02d}"
         fold_dir.mkdir(parents=True, exist_ok=True)
@@ -112,47 +103,48 @@ def process_fold(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Create feature-driven IDN v2 (argmax) CV folds on the full dataset."
-    )
-    parser.add_argument("--fold", type=str, default="all",
-                        help="Fold index (0-9) or 'all'")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--fold", type=int, required=True)
     args = parser.parse_args()
+
+    if not (0 <= args.fold < FOLDS):
+        raise ValueError(f"--fold must be in [0, {FOLDS - 1}], got {args.fold}")
 
     seed_everything(SEED)
 
-    if not PROBS_FILE.exists():
+    root       = project_root()
+    ham_one    = root / "data" / "processed" / "HAM10000" / "one_image_per_lesion"
+    meta_path  = ham_one / "HAM10000_metadata_one_per_lesion.csv"
+    probs_path = root / "data" / "processed" / "HAM10000" / "fold_probs" / "fold_probs_full.npy"
+    out_root   = root / "data" / "processed" / "HAM10000" / "cv_feature_driven_v2"
+    out_root.mkdir(parents=True, exist_ok=True)
+
+    if not probs_path.exists():
         raise FileNotFoundError(
-            f"Fold probs not found at {PROBS_FILE}.\n"
-            "Run collect_fold_probs.py (all folds) then merge_fold_probs.py first."
+            f"Fold probs not found at {probs_path}.\n"
+            "Run collect_fold_probs.py (all folds) then merge_fold_probs.py first "
+            "(already done as part of the original master_noise_submit.sh pipeline)."
         )
 
-    print(f"=== Prepare Feature-Driven IDN v2 (argmax) ===")
-    print(f"SEED={SEED} | FOLDS={FOLDS}")
-    print(f"Metadata: {METADATA}")
-    print(f"OOF probs: {PROBS_FILE}")
-    print(f"Output: {OUTPUT_DIR}")
+    print(f"=== Prepare Feature-Driven CV v2 (argmax) ===")
+    print(f"fold={args.fold} | SEED={SEED} | FOLDS={FOLDS}")
 
-    df = pd.read_csv(METADATA)
+    df = pd.read_csv(meta_path)
     df["image_id"]  = df["image_id"].astype(str)
     df["lesion_id"] = df["lesion_id"].astype(str)
     df["dx"]        = df["dx"].astype(str)
 
-    fold_probs_full = np.load(PROBS_FILE)
+    fold_probs_full = np.load(probs_path)
     print(f"Loaded fold probs: {fold_probs_full.shape}")
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    process_fold(
+        fold_id=args.fold,
+        df=df,
+        fold_probs_full=fold_probs_full,
+        out_root=out_root,
+    )
 
-    if args.fold == "all":
-        for fold_id in range(FOLDS):
-            process_fold(fold_id, df, fold_probs_full, OUTPUT_DIR)
-    else:
-        fold_id = int(args.fold)
-        if not (0 <= fold_id < FOLDS):
-            raise ValueError(f"--fold must be in [0, {FOLDS - 1}], got {fold_id}")
-        process_fold(fold_id, df, fold_probs_full, OUTPUT_DIR)
-
-    print(f"\nDone — written to {OUTPUT_DIR}")
+    print(f"\nDone — fold {args.fold} written to {out_root}")
 
 
 if __name__ == "__main__":
