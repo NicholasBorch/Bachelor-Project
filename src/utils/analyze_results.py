@@ -6,6 +6,8 @@
 # Usage:
 #   python -m src.utils.analyze_results --noise_type normalized_idn
 #   python -m src.utils.analyze_results --noise_type feature_driven_idn
+#   python -m src.utils.analyze_results --noise_type balanced_normalized_idn
+#   python -m src.utils.analyze_results --noise_type balanced_feature_driven_idn
 #   python -m src.utils.analyze_results --noise_type all
 
 from __future__ import annotations
@@ -44,6 +46,8 @@ METHOD_COLORS = {
 NOISE_TYPE_LABELS = {
     "normalized_idn":     "Normalised IDN",
     "feature_driven_idn": "Feature-Driven IDN",
+    "balanced_normalized_idn": "Balanced Normalised IDN",
+    "balanced_feature_driven_idn": "Balanced Feature-Driven IDN",
 }
 
 TAU_DIRS   = ["clean", "tau05", "tau10", "tau15", "tau20", "tau25", "tau30"]
@@ -507,7 +511,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--noise_type",
-        choices=["normalized_idn", "feature_driven_idn", "all"],
+        choices=["normalized_idn", "feature_driven_idn", "balanced_normalized_idn", "balanced_feature_driven_idn", "all"],
         required=True,
         help="Which noise type to analyse, or 'all' to run both",
     )
@@ -516,7 +520,7 @@ def main() -> None:
     results_root = project_root() / "results" / "HAM10000"
 
     noise_types = (
-        ["normalized_idn", "feature_driven_idn"]
+        ["normalized_idn", "feature_driven_idn", "balanced_normalized_idn", "balanced_feature_driven_idn"]
         if args.noise_type == "all"
         else [args.noise_type]
     )

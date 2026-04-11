@@ -14,7 +14,7 @@ NORM_STD = 0.10
 IMAGE_SIZE = 224
 
 # DataLoader
-BATCH_SIZE = 64
+BATCH_SIZE = 16 # set to 64 for stage 2 experiments
 NUM_WORKERS = 2
 PIN_MEMORY = True
 
