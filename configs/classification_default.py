@@ -7,7 +7,7 @@ SEED = 10
 FOLDS = 10
 
 # Noise injection
-NOISE_RATES = [0.0, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30]
+NOISE_RATES = [0.0, 0.10, 0.20, 0.30, 0.40, 0.50]
 NORM_STD = 0.10
 
 # Image preprocessing
