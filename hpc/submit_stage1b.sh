@@ -30,8 +30,6 @@ MEM_PER_CORE_MB=${MEM_PER_CORE_MB:-4000}
 GPU_SPEC=${GPU_SPEC:-"num=1:mode=exclusive_process"}
 LOG_DIR=${LOG_DIR:-logs}
 JOB_PREFIX=${JOB_PREFIX:-thesis}
-PROJECT_ROOT=${PROJECT_ROOT:-$(pwd)}
-VENV_PYTHON=${VENV_PYTHON:-${PROJECT_ROOT}/.venv/bin/python}
 
 mkdir -p "${LOG_DIR}"
 
@@ -51,7 +49,7 @@ for dataset in balanced imbalanced; do
              -J "${job_name}" \
              -o "${log_stem}.out" \
              -e "${log_stem}.err" \
-             "cd ${PROJECT_ROOT} && export PYTHONUNBUFFERED=1 && ${VENV_PYTHON} --version && ${VENV_PYTHON} -c 'import sys; print(sys.executable)' && ${VENV_PYTHON} -m scripts.stage1b_collect_oof_probs --dataset ${dataset} --fold ${fold}"
+             "export PYTHONUNBUFFERED=1 && python -m scripts.stage1b_collect_oof_probs --dataset ${dataset} --fold ${fold}"
         submitted=$((submitted + 1))
     done
 done
