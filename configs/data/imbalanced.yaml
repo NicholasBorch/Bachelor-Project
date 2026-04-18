@@ -1,0 +1,9 @@
+name: imbalanced
+metadata_file: HAM10000_metadata_one_per_lesion.csv
+num_samples: 7470
+batch_size: 64
+sampler: weighted_random
+class_weighted_loss: true
+# OOF training protocol is fixed (Adam, lr=1e-4, 30 epochs) and hardcoded
+# in scripts/stage1b_collect_oof_probs.py. See PROJECT_DOCUMENTATION §6
+# Stage 1b and §9 for rationale.
