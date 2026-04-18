@@ -33,9 +33,9 @@ def _find_raw_image(raw_dir: Path, image_id: str) -> Path | None:
 
 def deduplicate_one_image_per_lesion(
     raw_metadata: pd.DataFrame,
-    seed: int = 42,
+    seed: int = 10,
 ) -> pd.DataFrame:
-    """For each unique lesion_id, select one image at random (seed=42 per
+    """For each unique lesion_id, select one image at random (seed=10 per
     project documentation §3.1). Returns the deduplicated metadata DataFrame.
     """
     rng = random.Random(seed)
