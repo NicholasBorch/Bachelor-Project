@@ -30,7 +30,8 @@ MEM_PER_CORE_MB=${MEM_PER_CORE_MB:-4000}
 GPU_SPEC=${GPU_SPEC:-"num=1:mode=exclusive_process"}
 LOG_DIR=${LOG_DIR:-logs}
 JOB_PREFIX=${JOB_PREFIX:-thesis}
-VENV_PYTHON="${VENV_PYTHON:-$(pwd)/.venv/bin/python}"
+PROJECT_ROOT=${PROJECT_ROOT:-$(pwd)}
+VENV_PYTHON=${VENV_PYTHON:-${PROJECT_ROOT}/.venv/bin/python}
 
 mkdir -p "${LOG_DIR}"
 
@@ -42,15 +43,15 @@ for dataset in balanced imbalanced; do
         log_stem="${LOG_DIR}/stage1b_${dataset}_fold${fold_padded}"
 
         bsub -q "${QUEUE}" \
-            -W "${WALLTIME}" \
-            -n "${CPU_CORES}" \
-            -R "span[hosts=1]" \
-            -R "rusage[mem=${MEM_PER_CORE_MB}]" \
-            -gpu "${GPU_SPEC}" \
-            -J "${job_name}" \
-            -o "${log_stem}.out" \
-            -e "${log_stem}.err" \
-            "export PYTHONUNBUFFERED=1 && ${VENV_PYTHON} --version && ${VENV_PYTHON} -m scripts.stage1b_collect_oof_probs --dataset ${dataset} --fold ${fold}"
+             -W "${WALLTIME}" \
+             -n "${CPU_CORES}" \
+             -R "span[hosts=1]" \
+             -R "rusage[mem=${MEM_PER_CORE_MB}]" \
+             -gpu "${GPU_SPEC}" \
+             -J "${job_name}" \
+             -o "${log_stem}.out" \
+             -e "${log_stem}.err" \
+             "cd ${PROJECT_ROOT} && export PYTHONUNBUFFERED=1 && ${VENV_PYTHON} --version && ${VENV_PYTHON} -c 'import sys; print(sys.executable)' && ${VENV_PYTHON} -m scripts.stage1b_collect_oof_probs --dataset ${dataset} --fold ${fold}"
         submitted=$((submitted + 1))
     done
 done
