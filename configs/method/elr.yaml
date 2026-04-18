@@ -1,0 +1,4 @@
+name: elr
+# From Liu et al. 2020, CIFAR-10 settings
+lambda: 3.0
+beta: 0.7  # temporal ensembling momentum

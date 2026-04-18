@@ -1,0 +1,9 @@
+name: asyco
+# From Liu et al. 2023, CIFAR-10 settings
+K: 1  # top-K labels for reference net (K=1 per paper for CIFAR-10)
+lambda_u: 25.0
+temperature: 0.5
+warmup_epochs_pct: 0.05
+warmup_epochs_floor: 5
+# Both clf_net and ref_net use the main backbone (ResNet-34) per paper design:
+# the asymmetry is in the training objective (CE vs BCE), not the architecture.

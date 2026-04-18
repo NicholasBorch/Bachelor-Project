@@ -1,0 +1,3 @@
+depth: 34
+pretrained: true
+weights: IMAGENET1K_V1

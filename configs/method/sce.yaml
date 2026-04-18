@@ -1,0 +1,5 @@
+name: sce
+# From Wang et al. 2019, CIFAR-10 settings
+alpha: 0.1
+beta: 1.0
+A: -4.0  # clipping constant for log(0) in RCE

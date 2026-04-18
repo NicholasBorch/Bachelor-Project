@@ -1,0 +1,39 @@
+# Global configuration shared across all stages and runs.
+# This is the canonical hyperparameter lock. See PROJECT_DOCUMENTATION.md §9.
+
+seed: 10
+folds: 10
+image_size: 224
+num_workers: 4
+pin_memory: true
+mixed_precision: true
+
+num_classes: 7
+class_names: ["akiec", "bcc", "bkl", "df", "mel", "nv", "vasc"]
+
+# Backbones
+backbone: resnet34
+oof_backbone: resnet18  # for feature-driven IDN preparation only
+
+# Noise
+noise_rates: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]
+noise_sigma: 0.1
+# Per-fold noise seed = seed * 10000 + fold_id
+
+# Training protocol (common ground across methods; method-specific kwargs in configs/method/)
+weight_decay: 5.0e-4
+lr_scheduler: cosine_annealing
+epoch_cap: 100  # Hard cap on epoch budget selected by Stage 2
+
+# CUDA
+cudnn_benchmark: true
+
+# Paths (relative to project root)
+paths:
+  data_raw: data/raw/HAM10000
+  data_processed: data/processed/HAM10000
+  cv_folds: data/processed/HAM10000/cv_folds
+  images: data/processed/HAM10000/one_image_per_lesion/images
+  external: data/external
+  results: results
+  manifests: results/manifests
