@@ -1,9 +1,3 @@
-# Data
-data/raw/
-data/processed/
-data/
-# data/processed/HAM10000/one_image_per_lesion/
-# data/processed/WMH/
 results/
 
 # Python
