@@ -1,154 +1,57 @@
-# src/methods/baseline.py
-# Standard cross-entropy baseline for HAM10000 classification.
-# Trains ResNet-50 with weighted cross-entropy and weighted sampler on noisy
-# training folds, evaluates on clean test folds at the end of fixed training.
-# No noise handling — serves as the reference curve for all method comparisons.
-
+"""Baseline: standard cross-entropy training."""
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Optional
-
-import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
 
-from src.classification.dataset import HamTensorDataset
-from src.classification.models import build_resnet
-from src.classification.train import (
-    compute_class_weights,
-    get_transforms,
-    make_weighted_sampler,
-    train_one_epoch,
-)
-from src.common.io import class_mapping
-from src.common.logging import ResultsLogger, RunConfig, make_output_dir
-from src.common.metrics import compute_metrics, print_metrics
-from src.common.seed import seed_everything
-
-from configs.classification_default import PIN_MEMORY
+from src.methods.base import Method, MethodOutput
+from src.training.optim import build_optimizer, build_scheduler
 
 
-def run_baseline_fold(
-    train_noisy_df: pd.DataFrame,
-    test_clean_df: pd.DataFrame,
-    images_dir: Path,
-    results_root: Path,
-    *,
-    tau: float,
-    outer_fold: int,
-    seed: int,
-    noise_type: str,
-    backbone_depth: int = 50,
-    image_size: int = 224,
-    epochs: int = 100,
-    batch_size: int = 64,
-    lr: float = 1e-4,
-    num_workers: int = 2,
-    device: Optional[torch.device] = None,
-    use_weighted_sampler: bool = True,
-) -> dict:
-    # Trains baseline for a fixed number of epochs on one noisy training fold
-    # and evaluates once on the clean test fold after the final epoch.
-    seed_everything(seed)
+class BaselineMethod(Method):
+    """Plain cross-entropy. Serves as the reference curve."""
 
-    if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    def __init__(self, cfg: dict, device: torch.device, class_weights: torch.Tensor | None = None):
+        super().__init__(cfg, device)
+        self.class_weights = class_weights
+        self.model: nn.Module | None = None
+        self.optimizer: torch.optim.Optimizer | None = None
+        self.scheduler: torch.optim.lr_scheduler.LRScheduler | None = None
+        self.criterion: nn.Module | None = None
 
-    # Build label mappings from the union of train and test label sets
-    all_labels  = pd.concat([train_noisy_df["dx"], test_clean_df["dx"]]).tolist()
-    c2i, i2c    = class_mapping(all_labels)
-    num_classes = len(c2i)
-    class_names = [i2c[i] for i in range(num_classes)]
+    def build(self, total_epochs: int, model_builder) -> None:
+        self.model = model_builder().to(self.device)
+        self.optimizer = build_optimizer(self.model.parameters(), self.cfg["optim"])
+        self.scheduler = build_scheduler(
+            self.optimizer, total_epochs=total_epochs, name=self.cfg["lr_scheduler"],
+        )
+        self.criterion = nn.CrossEntropyLoss(weight=self.class_weights)
+        self._built = True
 
-    train_labels = [c2i[str(dx)] for dx in train_noisy_df["dx"]]
+    def train_step(self, batch, epoch, scaler) -> MethodOutput:
+        images, labels, _idx = batch
+        images = images.to(self.device, non_blocking=True)
+        labels = labels.to(self.device, non_blocking=True)
 
-    train_ds = HamTensorDataset(
-        train_noisy_df, images_dir, c2i, get_transforms(image_size, augment=True)
-    )
-    test_ds = HamTensorDataset(
-        test_clean_df, images_dir, c2i, get_transforms(image_size, augment=False)
-    )
+        self.model.train()
+        self.optimizer.zero_grad(set_to_none=True)
 
-    sampler = make_weighted_sampler(train_labels) if use_weighted_sampler else None
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=batch_size,
-        sampler=sampler,
-        shuffle=(sampler is None),   # shuffle=True only when no sampler — DataLoader
-                                     # raises an error if both sampler and shuffle=True
-        num_workers=num_workers,
-        pin_memory=PIN_MEMORY,
-    )
+        with torch.amp.autocast("cuda", enabled=scaler.is_enabled()):
+            logits = self.model(images)
+            loss = self.criterion(logits, labels)
 
-    print(f"    Sampler: {'weighted (replacement=True)' if use_weighted_sampler else 'shuffle=True (no sampler)'}")
+        scaler.scale(loss).backward()
+        scaler.step(self.optimizer)
+        scaler.update()
 
-    test_loader = DataLoader(
-        test_ds,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        pin_memory=PIN_MEMORY,
-    )
+        return MethodOutput(
+            loss_total=float(loss.item()),
+            loss_components={"ce": float(loss.item())},
+            batch_size=int(images.size(0)),
+        )
 
-    model     = build_resnet(num_classes=num_classes, pretrained=True, depth=backbone_depth).to(device)
-    criterion = nn.CrossEntropyLoss(
-        weight=compute_class_weights(train_labels, num_classes, device)
-    )
-    optimiser = torch.optim.Adam(model.parameters(), lr=lr)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimiser, T_max=epochs)
+    def _all_schedulers(self):
+        return [self.scheduler]
 
-    out_dir = make_output_dir(results_root, "baseline", tau, outer_fold, noise_type)
-    config  = RunConfig(
-        method="baseline",
-        tau=tau,
-        outer_fold=outer_fold,
-        seed=seed,
-        backbone=f"resnet{backbone_depth}",
-        epochs=epochs,
-        batch_size=batch_size,
-        lr=lr,
-        image_size=image_size,
-        noise_type=noise_type,
-    )
-    logger = ResultsLogger(out_dir, config)
-
-    print(f"\n--- Baseline | noise={noise_type} | tau={tau:.2f} | fold={outer_fold} ---")
-    print(f"    Train samples : {len(train_ds)}")
-    print(f"    Test samples  : {len(test_ds)}")
-    print(f"    Device        : {device} | Backbone: resnet{backbone_depth}")
-    print(f"    Epochs        : {epochs}")
-
-    for epoch in range(epochs):
-        train_loss = train_one_epoch(model, train_loader, criterion, optimiser, device)
-        scheduler.step()
-        logger.log_epoch(epoch + 1, train_loss)
-        print(f"    Epoch {epoch+1:03d}/{epochs} | train_loss={train_loss:.4f}")
-
-    # Single test evaluation after all epochs complete
-    model.eval()
-    all_true, all_pred, all_prob = [], [], []
-
-    with torch.no_grad():
-        for x, y, _ in test_loader:
-            x      = x.to(device)
-            logits = model(x)
-            probs  = torch.softmax(logits, dim=1).cpu().numpy()
-            preds  = logits.argmax(dim=1).cpu().numpy()
-            all_prob.append(probs)
-            all_pred.append(preds)
-            all_true.append(y.numpy())
-
-    y_true = np.concatenate(all_true)
-    y_pred = np.concatenate(all_pred)
-    y_prob = np.concatenate(all_prob)
-
-    metrics = compute_metrics(y_true, y_pred, y_prob, class_names)
-    logger.log_test_metrics(metrics)
-
-    print(f"\n    Test results (fold={outer_fold}, tau={tau:.2f}):")
-    print_metrics(metrics, prefix="    ")
-
-    return metrics
+    def inference_model(self) -> nn.Module:
+        return self.model

@@ -1,214 +1,157 @@
-# src/methods/elr.py
-#
-# Early-Learning Regularization (ELR) for HAM10000 classification.
-# Liu et al. (2020): https://arxiv.org/abs/2007.00151
-#
-# Structure mirrors baseline.py and sce.py.
-# The only differences from baseline are:
-#   1. Loss is ELRLoss instead of CrossEntropyLoss
-#   2. Training loop passes sample indices to the loss for target updates
-#   3. dataset.py returns integer sample index as third element (used here)
-#
-# Note: ELR requires sample indices to update the per-sample target buffer,
-# so it cannot use train_one_epoch from train.py (which calls
-# criterion(logits, labels) without indices). The inline loop below
-# mirrors train_one_epoch exactly, with the only difference being the
-# criterion call signature: criterion(index, logits, labels).
+"""ELR: Early-Learning Regularization (Liu et al. 2020).
 
+L_ELR = L_CE + lambda * mean[log(1 - <p_i, t_i>)]
+
+The target vector t_i is a per-sample temporal moving average of softmax
+predictions:
+    t_i(k) = beta * t_i(k-1) + (1 - beta) * p_i(k)
+
+CRITICAL (the ELR detach bug this entire project was built around):
+  - The inner product <p_i, t_i> in the REGULARIZATION term uses
+    probs WITH gradients (created from logits via softmax in the forward pass).
+  - The target BUFFER UPDATE uses probs_detached (we don't want gradients
+    leaking into the stored buffer across iterations).
+  - The buffer t_i itself is a plain tensor without gradients; it acts like
+    a "target" that p_i is being pulled toward.
+
+If you detach BOTH sides, the regularization term becomes a gradient-free
+constant and ELR degenerates into pure CE. That is THE bug; the fix is below.
+
+Hyperparameters from CIFAR-10 settings: lambda=3.0, beta=0.7.
+"""
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Optional
-
-import numpy as np
-import pandas as pd
 import torch
-from torch.utils.data import DataLoader
+import torch.nn as nn
+import torch.nn.functional as F
 
-from src.classification.dataset import HamTensorDataset
-from src.classification.models import build_resnet
-from src.classification.train import (
-    compute_class_weights,
-    get_transforms,
-    make_weighted_sampler,
-)
-from src.common.io import class_mapping
-from src.common.logging import ResultsLogger, RunConfig, make_output_dir
-from src.common.metrics import compute_metrics, print_metrics
-from src.common.seed import seed_everything
-from src.methods.elr_loss import ELRLoss
-from configs.classification_default import PIN_MEMORY
-from configs.classification_elr import ELR_BETA, ELR_LAMBDA
+from src.methods.base import Method, MethodOutput
+from src.training.optim import build_optimizer, build_scheduler
 
 
-def run_elr_fold(
-    train_noisy_df: pd.DataFrame,
-    test_clean_df: pd.DataFrame,
-    images_dir: Path,
-    results_root: Path,
-    *,
-    tau: float,
-    outer_fold: int,
-    seed: int,
-    noise_type: str,
-    backbone_depth: int = 50,
-    image_size: int = 224,
-    epochs: int = 100,
-    batch_size: int = 64,
-    lr: float = 1e-4,
-    num_workers: int = 2,
-    device: Optional[torch.device] = None,
-    use_weighted_sampler: bool = True,
-) -> dict:
-    """
-    Trains ELR for a fixed number of epochs on one noisy training fold
-    and evaluates once on the clean test fold after the final epoch.
-    """
-    seed_everything(seed)
+class ELRLoss(nn.Module):
+    """ELR loss with per-sample target buffer."""
 
-    if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    def __init__(
+        self,
+        num_samples: int,
+        num_classes: int,
+        lambda_elr: float,
+        beta: float,
+        class_weights: torch.Tensor | None = None,
+    ):
+        super().__init__()
+        self.lambda_elr = float(lambda_elr)
+        self.beta = float(beta)
+        self.num_classes = int(num_classes)
+        self.class_weights = class_weights
 
-    # ── Label mappings ─────────────────────────────────────────────────────
-    all_labels  = pd.concat([train_noisy_df["dx"], test_clean_df["dx"]]).tolist()
-    c2i, i2c    = class_mapping(all_labels)
-    num_classes = len(c2i)
-    class_names = [i2c[i] for i in range(num_classes)]
+        # Target buffer, registered as a buffer so it moves with .to(device)
+        # but is NOT trainable.
+        self.register_buffer(
+            "target",
+            torch.zeros(num_samples, num_classes, dtype=torch.float32),
+        )
 
-    train_labels = [c2i[str(dx)] for dx in train_noisy_df["dx"]]
-    n_train      = len(train_noisy_df)
+    def forward(
+        self,
+        logits: torch.Tensor,
+        labels: torch.Tensor,
+        indices: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        # ----- CE term -----
+        ce = F.cross_entropy(logits, labels, weight=self.class_weights, reduction="mean")
 
-    # ── Datasets and loaders ───────────────────────────────────────────────
-    train_ds = HamTensorDataset(
-        train_noisy_df, images_dir, c2i, get_transforms(image_size, augment=True)
-    )
-    test_ds = HamTensorDataset(
-        test_clean_df, images_dir, c2i, get_transforms(image_size, augment=False)
-    )
+        # ----- Softmax WITH gradients for the regularization term -----
+        probs = F.softmax(logits, dim=1)  # has gradients
 
-    sampler = make_weighted_sampler(train_labels) if use_weighted_sampler else None
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=batch_size,
-        sampler=sampler,
-        shuffle=(sampler is None),   # shuffle=True only when no sampler — DataLoader
-                                     # raises an error if both sampler and shuffle=True
-        num_workers=num_workers,
-        pin_memory=PIN_MEMORY,
-    )
+        # ----- Target buffer update uses detached probs -----
+        with torch.no_grad():
+            probs_detached = probs.detach()
+            # Update rows indicated by `indices`. Note that rare-sample indices
+            # may not appear in this batch — that's fine, their buffer rows
+            # just stay as they were.
+            self.target[indices] = (
+                self.beta * self.target[indices]
+                + (1.0 - self.beta) * probs_detached.to(self.target.dtype)
+            )
 
-    print(f"    Sampler: {'weighted (replacement=True)' if use_weighted_sampler else 'shuffle=True (no sampler)'}")
-    
-    test_loader = DataLoader(
-        test_ds,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        pin_memory=PIN_MEMORY,
-    )
+        # ----- Regularization term uses probs (with grads) and the current
+        # (detached-by-construction) target buffer -----
+        t = self.target[indices].to(probs.dtype)  # shape (B, C), no grad
+        inner = (probs * t).sum(dim=1)            # shape (B,), has grad via probs
+        # Clamp for numerical stability around <p, t> ≈ 1.
+        inner = torch.clamp(inner, max=1.0 - 1e-4)
+        reg = torch.log(1.0 - inner).mean()       # negative scalar
 
-    # ── Model ──────────────────────────────────────────────────────────────
-    model = build_resnet(
-        num_classes=num_classes, pretrained=True, depth=backbone_depth
-    ).to(device)
+        total = ce + self.lambda_elr * reg
 
-    # ── ELR loss ───────────────────────────────────────────────────────────
-    # Class weights applied to CE component only — matches baseline weighting.
-    # The ELR regularisation term operates on softmax predictions and does
-    # not require explicit class rebalancing.
-    class_weights = compute_class_weights(train_labels, num_classes, device)
-    criterion = ELRLoss(
-        num_examp=n_train,
-        num_classes=num_classes,
-        elr_lambda=ELR_LAMBDA,
-        beta=ELR_BETA,
-        device=device,
-        class_weights=class_weights,
-    )
+        return {"total": total, "ce": ce.detach(), "reg": reg.detach()}
 
-    # ── Optimiser and scheduler ────────────────────────────────────────────
-    optimiser = torch.optim.Adam(model.parameters(), lr=lr)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimiser, T_max=epochs)
 
-    # ── Logging ────────────────────────────────────────────────────────────
-    out_dir = make_output_dir(results_root, "elr", tau, outer_fold, noise_type)
-    config  = RunConfig(
-        method="elr",
-        tau=tau,
-        outer_fold=outer_fold,
-        seed=seed,
-        backbone=f"resnet{backbone_depth}",
-        epochs=epochs,
-        batch_size=batch_size,
-        lr=lr,
-        image_size=image_size,
-        noise_type=noise_type,
-        extra={
-            "beta":       ELR_BETA,
-            "elr_lambda": ELR_LAMBDA,
-        },
-    )
-    logger = ResultsLogger(out_dir, config)
+class ELRMethod(Method):
+    def __init__(
+        self,
+        cfg: dict,
+        device: torch.device,
+        num_train_samples: int,
+        num_classes: int,
+        class_weights: torch.Tensor | None = None,
+    ):
+        super().__init__(cfg, device)
+        self.num_train_samples = num_train_samples
+        self.num_classes = num_classes
+        self.class_weights = class_weights
+        self.model: nn.Module | None = None
+        self.optimizer: torch.optim.Optimizer | None = None
+        self.scheduler: torch.optim.lr_scheduler.LRScheduler | None = None
+        self.criterion: ELRLoss | None = None
 
-    print(f"\n--- ELR | noise={noise_type} | tau={tau:.2f} | fold={outer_fold} ---")
-    print(f"    beta={ELR_BETA} | lambda={ELR_LAMBDA}")
-    print(f"    Train samples : {len(train_ds)}")
-    print(f"    Test samples  : {len(test_ds)}")
-    print(f"    Device        : {device} | Backbone: resnet{backbone_depth}")
-    print(f"    Epochs        : {epochs}")
+    def build(self, total_epochs: int, model_builder) -> None:
+        self.model = model_builder().to(self.device)
+        self.optimizer = build_optimizer(self.model.parameters(), self.cfg["optim"])
+        self.scheduler = build_scheduler(
+            self.optimizer, total_epochs=total_epochs, name=self.cfg["lr_scheduler"],
+        )
+        m = self.cfg["method"]
+        self.criterion = ELRLoss(
+            num_samples=self.num_train_samples,
+            num_classes=self.num_classes,
+            lambda_elr=m["lambda"],
+            beta=m["beta"],
+            class_weights=self.class_weights,
+        ).to(self.device)
+        self._built = True
 
-    # ── Training loop ──────────────────────────────────────────────────────
-    # Mirrors train_one_epoch exactly. The only structural difference is the
-    # criterion call: criterion(index, logits, labels) instead of
-    # criterion(logits, labels). This is necessary because ELR's target
-    # buffer is indexed by sample position.
-    #
-    # Denominator uses len(loader.dataset) to match train_one_epoch exactly,
-    # eliminating any reporting discrepancy from accumulated batch sizes.
-    for epoch in range(epochs):
-        model.train()
-        total_loss = 0.0
+    def train_step(self, batch, epoch, scaler) -> MethodOutput:
+        images, labels, indices = batch
+        images = images.to(self.device, non_blocking=True)
+        labels = labels.to(self.device, non_blocking=True)
+        indices = indices.to(self.device, non_blocking=True)
 
-        for x, y, idx in train_loader:
-            x   = x.to(device)
-            y   = y.to(device)
-            idx = idx.to(device)
+        self.model.train()
+        self.optimizer.zero_grad(set_to_none=True)
 
-            optimiser.zero_grad()
-            logits = model(x)
-            loss   = criterion(idx, logits, y)
-            loss.backward()
-            optimiser.step()
+        with torch.amp.autocast("cuda", enabled=scaler.is_enabled()):
+            logits = self.model(images)
+            parts = self.criterion(logits, labels, indices)
+            loss = parts["total"]
 
-            total_loss += loss.item() * x.size(0)
+        scaler.scale(loss).backward()
+        scaler.step(self.optimizer)
+        scaler.update()
 
-        train_loss = total_loss / len(train_loader.dataset)
-        scheduler.step()
-        logger.log_epoch(epoch + 1, train_loss)
-        print(f"    Epoch {epoch+1:03d}/{epochs} | train_loss={train_loss:.4f}")
+        return MethodOutput(
+            loss_total=float(loss.item()),
+            loss_components={
+                "ce": float(parts["ce"].item()),
+                "reg": float(parts["reg"].item()),
+            },
+            batch_size=int(images.size(0)),
+        )
 
-    # ── Single test evaluation after all epochs complete ───────────────────
-    model.eval()
-    all_true, all_pred, all_prob = [], [], []
+    def _all_schedulers(self):
+        return [self.scheduler]
 
-    with torch.no_grad():
-        for x, y, _ in test_loader:
-            x      = x.to(device)
-            logits = model(x)
-            probs  = torch.softmax(logits, dim=1).cpu().numpy()
-            preds  = logits.argmax(dim=1).cpu().numpy()
-            all_prob.append(probs)
-            all_pred.append(preds)
-            all_true.append(y.numpy())
-
-    y_true = np.concatenate(all_true)
-    y_pred = np.concatenate(all_pred)
-    y_prob = np.concatenate(all_prob)
-
-    metrics = compute_metrics(y_true, y_pred, y_prob, class_names)
-    logger.log_test_metrics(metrics)
-
-    print(f"\n    Test results (fold={outer_fold}, tau={tau:.2f}):")
-    print_metrics(metrics, prefix="    ")
-
-    return metrics
+    def inference_model(self) -> nn.Module:
+        return self.model
