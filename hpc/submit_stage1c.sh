@@ -27,9 +27,9 @@
 set -euo pipefail
 
 QUEUE=${QUEUE:-hpc}
-WALLTIME=${WALLTIME:-1:00}         # ~5 min real; 1h gives massive margin
+WALLTIME=${WALLTIME:-2:00}         # ~5 min real; 1h gives massive margin
 CPU_CORES=${CPU_CORES:-4}
-MEM_PER_CORE_MB=${MEM_PER_CORE_MB:-2000}
+MEM_PER_CORE_MB=${MEM_PER_CORE_MB:-4000}
 LOG_DIR=${LOG_DIR:-logs}
 JOB_PREFIX=${JOB_PREFIX:-thesis}
 
@@ -44,14 +44,14 @@ for dataset in balanced imbalanced; do
             log_stem="${LOG_DIR}/stage1c_${dataset}_${noise_type}_fold${fold_padded}"
 
             bsub -q "${QUEUE}" \
-                 -W "${WALLTIME}" \
-                 -n "${CPU_CORES}" \
-                 -R "span[hosts=1]" \
-                 -R "rusage[mem=${MEM_PER_CORE_MB}]" \
-                 -J "${job_name}" \
-                 -o "${log_stem}.out" \
-                 -e "${log_stem}.err" \
-                 "export PYTHONUNBUFFERED=1 && python -m scripts.stage1c_inject_noise --dataset ${dataset} --noise-type ${noise_type} --fold ${fold}"
+                -W "${WALLTIME}" \
+                -n "${CPU_CORES}" \
+                -R "span[hosts=1]" \
+                -R "rusage[mem=${MEM_PER_CORE_MB}]" \
+                -J "${job_name}" \
+                -o "${log_stem}.out" \
+                -e "${log_stem}.err" \
+                "source /work3/s234841/venv/Bachelor-Project/bin/activate && export PYTHONUNBUFFERED=1 && python -m scripts.stage1c_inject_noise --dataset ${dataset} --noise-type ${noise_type} --fold ${fold}"
             submitted=$((submitted + 1))
         done
     done
