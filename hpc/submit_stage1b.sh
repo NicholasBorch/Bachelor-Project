@@ -49,7 +49,7 @@ for dataset in balanced imbalanced; do
             -J "${job_name}" \
             -o "${log_stem}.out" \
             -e "${log_stem}.err" \
-            "source /work3/s234841/data/Bachelor-Project/.venv/bin/activate && export PYTHONUNBUFFERED=1 && python -m scripts.stage1b_collect_oof_probs --dataset ${dataset} --fold ${fold}"
+            "source /work3/s234841/venv/Bachelor-Project/bin/activate && export PYTHONUNBUFFERED=1 && python -m scripts.stage1b_collect_oof_probs --dataset ${dataset} --fold ${fold}"
         submitted=$((submitted + 1))
     done
 done
