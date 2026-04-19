@@ -29,7 +29,7 @@ set -euo pipefail
 QUEUE=${QUEUE:-hpc}
 WALLTIME=${WALLTIME:-2:00}         # ~5 min real; 1h gives massive margin
 CPU_CORES=${CPU_CORES:-4}
-MEM_PER_CORE_MB=${MEM_PER_CORE_MB:-4000}
+MEM_PER_CORE_MB=${MEM_PER_CORE_MB:-16000}
 LOG_DIR=${LOG_DIR:-logs}
 JOB_PREFIX=${JOB_PREFIX:-thesis}
 
