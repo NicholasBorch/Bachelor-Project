@@ -41,15 +41,15 @@ for dataset in balanced imbalanced; do
         log_stem="${LOG_DIR}/stage1b_${dataset}_fold${fold_padded}"
 
         bsub -q "${QUEUE}" \
-             -W "${WALLTIME}" \
-             -n "${CPU_CORES}" \
-             -R "span[hosts=1]" \
-             -R "rusage[mem=${MEM_PER_CORE_MB}]" \
-             -gpu "${GPU_SPEC}" \
-             -J "${job_name}" \
-             -o "${log_stem}.out" \
-             -e "${log_stem}.err" \
-             "export PYTHONUNBUFFERED=1 && python -m scripts.stage1b_collect_oof_probs --dataset ${dataset} --fold ${fold}"
+            -W "${WALLTIME}" \
+            -n "${CPU_CORES}" \
+            -R "span[hosts=1]" \
+            -R "rusage[mem=${MEM_PER_CORE_MB}]" \
+            -gpu "${GPU_SPEC}" \
+            -J "${job_name}" \
+            -o "${log_stem}.out" \
+            -e "${log_stem}.err" \
+            "source /work3/s234841/data/Bachelor-Project/.venv/bin/activate && export PYTHONUNBUFFERED=1 && python -m scripts.stage1b_collect_oof_probs --dataset ${dataset} --fold ${fold}"
         submitted=$((submitted + 1))
     done
 done
