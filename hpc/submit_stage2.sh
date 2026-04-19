@@ -25,7 +25,7 @@ set -euo pipefail
 
 QUEUE=${QUEUE:-gpuv100}
 CPU_CORES=${CPU_CORES:-8}
-MEM_PER_CORE_MB=${MEM_PER_CORE_MB:-4000}
+MEM_PER_CORE_MB=${MEM_PER_CORE_MB:-10000}
 GPU_SPEC=${GPU_SPEC:-"num=1:mode=exclusive_process"}
 LOG_DIR=${LOG_DIR:-logs}
 JOB_PREFIX=${JOB_PREFIX:-thesis}
@@ -38,11 +38,11 @@ get_walltime() {
     local dataset="$1"
     local method="$2"
     case "${dataset}-${method}" in
-        balanced-baseline|balanced-sce|balanced-elr)    echo "2:00" ;;
-        balanced-asyco)                                  echo "4:00" ;;
-        imbalanced-baseline|imbalanced-sce|imbalanced-elr) echo "12:00" ;;
-        imbalanced-asyco)                                 echo "24:00" ;;
-        *) echo "24:00" ;;  # conservative fallback
+        balanced-baseline|balanced-sce|balanced-elr)    echo "2:30" ;;
+        balanced-asyco)                                  echo "5:00" ;;
+        imbalanced-baseline|imbalanced-sce|imbalanced-elr) echo "15:00" ;;
+        imbalanced-asyco)                                 echo "23:59" ;;
+        *) echo "23:59" ;;  # conservative fallback
     esac
 }
 
@@ -56,15 +56,15 @@ for dataset in balanced imbalanced; do
             log_stem="${LOG_DIR}/stage2_${dataset}_${method}_fold${fold_padded}"
 
             bsub -q "${QUEUE}" \
-                 -W "${walltime}" \
-                 -n "${CPU_CORES}" \
-                 -R "span[hosts=1]" \
-                 -R "rusage[mem=${MEM_PER_CORE_MB}]" \
-                 -gpu "${GPU_SPEC}" \
-                 -J "${job_name}" \
-                 -o "${log_stem}.out" \
-                 -e "${log_stem}.err" \
-                 "export PYTHONUNBUFFERED=1 && python -m scripts.stage2_select_epoch_budget --dataset ${dataset} --method ${method} --fold ${fold}"
+                -W "${walltime}" \
+                -n "${CPU_CORES}" \
+                -R "span[hosts=1]" \
+                -R "rusage[mem=${MEM_PER_CORE_MB}]" \
+                -gpu "${GPU_SPEC}" \
+                -J "${job_name}" \
+                -o "${log_stem}.out" \
+                -e "${log_stem}.err" \
+                "source /work3/s234841/venv/Bachelor-Project/bin/activate && export PYTHONUNBUFFERED=1 && python -m scripts.stage2_select_epoch_budget --dataset ${dataset} --method ${method} --fold ${fold}"
             submitted=$((submitted + 1))
         done
     done
