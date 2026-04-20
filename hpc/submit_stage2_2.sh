@@ -40,10 +40,10 @@ get_walltime() {
     local model="$4"
 
     case "${dataset}-${method}-${optim}-${model}" in
-        balanced-*-*-*) echo "1:30" ;;
-        imbalanced-*-sgd-*) echo "4:00" ;;
-        imbalanced-*-adam-*) echo "4:00" ;;
-        *) echo "4:00" ;;
+        balanced-*-*-*) echo "0:45" ;;
+        imbalanced-*-sgd-*) echo "1:30" ;;
+        imbalanced-*-adam-*) echo "3:00" ;;
+        *) echo "3:00" ;;
     esac
 }
 
