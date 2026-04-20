@@ -23,7 +23,7 @@ noise_sigma: 0.1
 # Training protocol (common ground across methods; method-specific kwargs in configs/method/)
 weight_decay: 5.0e-4
 lr_scheduler: cosine_annealing
-epoch_cap: 100  # Hard cap on epoch budget selected by Stage 2
+epoch_cap: 300  # Hard cap on epoch budget selected by Stage 2
 
 # CUDA
 cudnn_benchmark: true
