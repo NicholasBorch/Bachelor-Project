@@ -21,7 +21,7 @@ noise_sigma: 0.1
 # Per-fold noise seed = seed * 10000 + fold_id
 
 # Training protocol (common ground across methods; method-specific kwargs in configs/method/)
-weight_decay: 5.0e-4
+weight_decay: 1.0e-4
 lr_scheduler: cosine_annealing
 epoch_cap: 300  # Hard cap on epoch budget selected by Stage 2
 
