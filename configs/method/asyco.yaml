@@ -1,6 +1,6 @@
 name: asyco
 # From Liu et al. 2023, CIFAR-10 settings
-K: 1  # top-K labels for reference net (K=1 per paper for CIFAR-10)
+K: 2  # top-K labels for reference net (K=1 per paper for CIFAR-10)
 lambda_u: 25.0
 temperature: 0.5
 warmup_epochs_pct: 0.05
