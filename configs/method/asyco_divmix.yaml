@@ -1,0 +1,23 @@
+name: asyco_divmix
+# AsyCo + DivideMix MixMatch (Liu et al. 2023, §4.2: "we use MixMatch from
+# DivideMix"). Same multi-view consensus as asyco.yaml; the additional
+# fields below configure the MixMatch wrapper.
+#
+# Multi-view consensus (same defaults as asyco.yaml)
+K: 2  # top-K labels for reference net (paper uses K=1 for CIFAR-10)
+lambda_u: 25.0          # target weight on the unsupervised MSE term
+temperature: 0.5        # sharpening temperature for co-guessing
+warmup_epochs_pct: 0.05
+warmup_epochs_floor: 5
+
+# MixMatch additions
+mixup_alpha: 0.75       # Beta(α, α) for MixUp. DivideMix uses α=4 on CIFAR;
+                        # 0.75 is gentler — appropriate for fine-grained
+                        # medical images. Tune per dataset if needed.
+rampup_epochs: 16       # linear λ_u ramp post-warmup. DivideMix's default.
+                        # For very short epoch budgets, λ_u may not reach
+                        # its target value (matches DivideMix's behavior).
+lambda_prior: 1.0       # weight on KL(uniform || mean_predictions). Small
+                        # regularizer that prevents single-class collapse.
+# Both clf_net and ref_net use the main backbone (ResNet-34) per paper
+# design: the asymmetry is in the training objective, not the architecture.

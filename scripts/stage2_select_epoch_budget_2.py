@@ -40,6 +40,9 @@ from src.utils.manifest import write_manifest
 from src.utils.seed import fold_seed
 
 
+METHOD_CHOICES = ["baseline", "sce", "elr", "asyco", "asyco_divmix"]
+
+
 def _tau_dirname(tau: float) -> str:
     return f"tau_{int(round(tau * 100)):02d}"
 
@@ -154,7 +157,7 @@ if __name__ == "__main__":
         description="Stage 2 v2: per-fold epoch budget selection across optim/model configs"
     )
     p.add_argument("--dataset", required=True, choices=["balanced", "imbalanced"])
-    p.add_argument("--method", required=True, choices=["baseline", "sce", "elr", "asyco"])
+    p.add_argument("--method", required=True, choices=METHOD_CHOICES)
     p.add_argument("--optim", required=True, choices=["sgd", "adam"])
     p.add_argument(
         "--model",

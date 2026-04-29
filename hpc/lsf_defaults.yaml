@@ -27,6 +27,8 @@ gpu_spec: "num=1:mode=exclusive_process"
 # guide). ResNet-34 is ~1.5× faster; ResNet-18 ~2× faster than ResNet-34:
 #   - baseline/SCE/ELR @ 25 ep, ResNet-50, imbalanced:  ~140 min
 #   - AsyCo             @ 25 ep, ResNet-50, imbalanced:  ~349 min
+#   - AsyCo+DivMix      @ 25 ep, ResNet-50, imbalanced:  ~700 min (extrapolated;
+#       MixMatch adds ~2× the per-step cost over plain AsyCo)
 #
 # Stage 1b: ResNet-18, 30 epochs, locked protocol. Imbalanced ≈ 56 min,
 #           balanced ≈ 4 min. 3:00 gives 2h margin on imbalanced.
@@ -44,12 +46,14 @@ stage1c_walltime: "1:00"     # Noise injection (CPU; minutes real)
 
 # Per-method Stage 3 walltimes. generate_stage3_jobs.py reads these and
 # assigns a method-specific -W per job. Non-AsyCo at 100 epochs imbalanced
-# is ~6.2h; AsyCo imbalanced is ~15.5h.
+# is ~6.2h; AsyCo imbalanced is ~15.5h; AsyCo+DivMix hits the 24h cap.
 stage3_walltime_by_method:
-  baseline: "12:00"          # ~6.2h worst case, ~5.8h margin
-  sce:      "12:00"
-  elr:      "12:00"
-  asyco:    "24:00"          # ~15.5h worst case, ~8.5h margin
+  baseline:      "12:00"     # ~6.2h worst case, ~5.8h margin
+  sce:           "12:00"
+  elr:           "12:00"
+  asyco:         "24:00"     # ~15.5h worst case, ~8.5h margin
+  asyco_divmix:  "24:00"     # ~31h extrapolated for 100 epochs imbalanced ResNet-34;
+                             # 25-epoch budget should fit; longer budgets risk truncation.
 
 # Where to write job stdout/stderr. Relative to the project root. The
 # submit scripts create this directory if missing. If logs grow large,

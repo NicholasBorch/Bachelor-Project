@@ -26,18 +26,21 @@ logger = logging.getLogger(__name__)
 
 # Locked method ordering + color palette. Baseline is the control and is
 # always drawn in grey. Robust methods use colorblind-friendly hues.
-METHOD_ORDER: list[str] = ["baseline", "sce", "elr", "asyco"]
+# AsyCo+DivMix is drawn in purple so it sits visually next to AsyCo (green).
+METHOD_ORDER: list[str] = ["baseline", "sce", "elr", "asyco", "asyco_divmix"]
 METHOD_COLORS: dict[str, str] = {
     "baseline": "#555555",
     "sce": "#1f77b4",
     "elr": "#d62728",
     "asyco": "#2ca02c",
+    "asyco_divmix": "#9467bd",
 }
 METHOD_LABELS: dict[str, str] = {
     "baseline": "Baseline (CE)",
     "sce": "SCE",
     "elr": "ELR",
     "asyco": "AsyCo",
+    "asyco_divmix": "AsyCo+MixMatch",
 }
 
 # Metrics shown in the 4-panel "metrics vs τ" summary plot. Cohen's kappa

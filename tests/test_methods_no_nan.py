@@ -1,13 +1,14 @@
-"""Smoke test for all four methods.
+"""Smoke test for all five methods.
 
 Runs a tiny training loop (a few batches, a few epochs) on synthetic data for
-each of {baseline, sce, elr, asyco} in both balanced and imbalanced settings,
-checks that:
+each of {baseline, sce, elr, asyco, asyco_divmix} in both balanced and
+imbalanced settings, checks that:
     - no NaNs/Infs appear in the loss
     - the loss actually goes down (at least a little)
     - prediction outputs have the right shape
     - ELR's regularization actually contributes gradients (detach fix check)
-    - AsyCo exits warmup correctly and still produces valid losses
+    - AsyCo/AsyCo+DivMix exit warmup correctly and still produce valid losses
+    - methods that need two augmented views per batch get them, others don't
 """
 from __future__ import annotations
 
@@ -24,9 +25,13 @@ from torch.utils.data import DataLoader
 
 from src.data.ham10000 import CLASS_NAMES, NUM_CLASSES, HamDataset
 from src.data.transforms import get_test_transforms, get_train_transforms
+from src.data.two_view import TwoViewHamDataset
 from src.methods import build_method
 from src.models.resnet import build_resnet
 from src.training.samplers import compute_class_weights, make_weighted_sampler
+
+
+METHODS_TO_TEST = ["baseline", "sce", "elr", "asyco", "asyco_divmix"]
 
 
 def _make_dummy(tmpdir: Path, n_per_class: int = 4):
@@ -73,7 +78,27 @@ def _base_cfg(method_name: str, dataset_name: str = "imbalanced"):
             "name": "asyco", "K": 1, "lambda_u": 25.0, "temperature": 0.5,
             "warmup_epochs_pct": 0.05, "warmup_epochs_floor": 2,  # small floor for test
         }
+    elif method_name == "asyco_divmix":
+        cfg["method"] = {
+            "name": "asyco_divmix", "K": 1, "lambda_u": 25.0, "temperature": 0.5,
+            "warmup_epochs_pct": 0.05, "warmup_epochs_floor": 2,
+            "mixup_alpha": 0.75, "rampup_epochs": 4, "lambda_prior": 1.0,
+        }
     return cfg
+
+
+def _method_requires_two_views(method_name: str) -> bool:
+    """Mirror the runner's logic so the test wraps datasets correctly."""
+    from src.methods.baseline import BaselineMethod
+    from src.methods.sce import SCEMethod
+    from src.methods.elr import ELRMethod
+    from src.methods.asyco import AsyCoMethod
+    from src.methods.asyco_divmix import AsyCoDivMixMethod
+    cls_map = {
+        "baseline": BaselineMethod, "sce": SCEMethod, "elr": ELRMethod,
+        "asyco": AsyCoMethod, "asyco_divmix": AsyCoDivMixMethod,
+    }
+    return bool(getattr(cls_map[method_name], "requires_two_views", False))
 
 
 def _run_method(method_name: str, dataset_name: str, total_epochs: int = 4):
@@ -83,7 +108,13 @@ def _run_method(method_name: str, dataset_name: str, total_epochs: int = 4):
         cfg = _base_cfg(method_name, dataset_name)
         device = torch.device("cpu")
 
-        train_ds = HamDataset(md, images_dir=images_dir, transform=get_train_transforms(64))
+        # Wrap train dataset for methods that need two views.
+        if _method_requires_two_views(method_name):
+            base_train = HamDataset(md, images_dir=images_dir, transform=None)
+            train_ds = TwoViewHamDataset(base_train, transform=get_train_transforms(64))
+        else:
+            train_ds = HamDataset(md, images_dir=images_dir, transform=get_train_transforms(64))
+
         test_ds = HamDataset(md, images_dir=images_dir, transform=get_test_transforms(64, 72))
 
         labels_idx = np.array([CLASS_NAMES.index(c) for c in md["dx"]])
@@ -133,10 +164,10 @@ def _run_method(method_name: str, dataset_name: str, total_epochs: int = 4):
         # Not a strict "went down" because AsyCo's loss jumps at warmup exit.
         first = np.mean(losses[: len(losses) // 4])
         last = np.mean(losses[-len(losses) // 4 :])
-        # For AsyCo, warmup->postwarmup transition changes loss scale; we
+        # For AsyCo/AsyCo+DivMix, warmup->postwarmup transition changes loss scale; we
         # only require finiteness at the end, not monotone decrease.
         assert math.isfinite(last), f"[{method_name}/{dataset_name}] final loss not finite"
-        print(f"[{method_name:8s}/{dataset_name:11s}] losses[{first:.3f} -> {last:.3f}] OK "
+        print(f"[{method_name:14s}/{dataset_name:11s}] losses[{first:.3f} -> {last:.3f}] OK "
               f"(y_prob range [{y_prob.min():.3f}, {y_prob.max():.3f}])")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -180,7 +211,7 @@ def test_elr_regularization_has_gradients():
 
 
 if __name__ == "__main__":
-    for method_name in ["baseline", "sce", "elr", "asyco"]:
+    for method_name in METHODS_TO_TEST:
         for ds in ["balanced", "imbalanced"]:
             _run_method(method_name, ds)
     test_elr_regularization_has_gradients()

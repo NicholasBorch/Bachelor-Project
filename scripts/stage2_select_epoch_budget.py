@@ -11,7 +11,7 @@ Hyperparameters locked for Stage 2 (PROJECT_DOCUMENTATION §6 Stage 2):
     - ImageNet-pretrained ResNet-34
     - Clean (τ=0) feature-driven fold CSVs
 Both choices are intentional: init and optim are Stage 3's concern, so we
-pin Stage 2 to one configuration so that all four methods are budgeted
+pin Stage 2 to one configuration so that all five methods are budgeted
 under the same selection conditions.
 
 The fold's TEST set is NEVER touched in Stage 2 — this is enforced by
@@ -22,6 +22,8 @@ See PROJECT_DOCUMENTATION §10 item 4 for the leakage-prevention rationale.
 Run:
     python -m scripts.stage2_select_epoch_budget \\
         --dataset imbalanced --method elr --fold 0
+    python -m scripts.stage2_select_epoch_budget \\
+        --dataset imbalanced --method asyco_divmix --fold 0
 """
 from __future__ import annotations
 
@@ -36,6 +38,9 @@ from src.training.runner import run_training
 from src.utils.io import load_config, project_root
 from src.utils.manifest import write_manifest
 from src.utils.seed import fold_seed
+
+
+METHOD_CHOICES = ["baseline", "sce", "elr", "asyco", "asyco_divmix"]
 
 
 def _tau_dirname(tau: float) -> str:
@@ -147,6 +152,6 @@ if __name__ == "__main__":
         description="Stage 2: per-fold epoch budget selection (clean data)"
     )
     p.add_argument("--dataset", required=True, choices=["balanced", "imbalanced"])
-    p.add_argument("--method", required=True, choices=["baseline", "sce", "elr", "asyco"])
+    p.add_argument("--method", required=True, choices=METHOD_CHOICES)
     p.add_argument("--fold", required=True, type=int, help="fold id, 0..9")
     sys.exit(main(p.parse_args()))

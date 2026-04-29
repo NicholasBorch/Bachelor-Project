@@ -39,6 +39,9 @@ from src.utils.io import load_config, project_root
 from src.utils.manifest import write_manifest
 
 
+METHOD_CHOICES = ["baseline", "sce", "elr", "asyco", "asyco_divmix"]
+
+
 def _load_jsonl(path: Path) -> list[dict]:
     """Read a JSONL file into a list of dicts."""
     records: list[dict] = []
@@ -246,7 +249,7 @@ if __name__ == "__main__":
         description="Stage 2 aggregation v2: median epoch budget from 10 per-fold logs"
     )
     p.add_argument("--dataset", required=True, choices=["balanced", "imbalanced"])
-    p.add_argument("--method", required=True, choices=["baseline", "sce", "elr", "asyco"])
+    p.add_argument("--method", required=True, choices=METHOD_CHOICES)
     p.add_argument("--optim", required=True, choices=["sgd", "adam"])
     p.add_argument(
         "--model",

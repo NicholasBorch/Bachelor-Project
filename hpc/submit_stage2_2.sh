@@ -4,8 +4,8 @@
 # Submit Stage 2 v2 epoch-budget selection jobs across optimizer / model-init
 # configurations. Grid:
 #
-#   2 datasets × 4 methods × 2 optimizers × 2 model configs × 10 folds
-#   = 320 jobs
+#   2 datasets × 5 methods × 2 optimizers × 2 model configs × 10 folds
+#   = 400 jobs
 #
 # Each job trains the method on clean (τ=0) training folds for up to the
 # epoch cap specified in config (now 300 in base.yaml), logging validation
@@ -33,6 +33,8 @@ mkdir -p "${LOG_DIR}"
 
 # Conservative walltimes for 300-epoch runs.
 # Scratch/pretrained should be similar in runtime; Adam may be slightly slower.
+# AsyCo+DivMix entries get ~2× the comparable AsyCo budget because MixMatch
+# adds two more clf_net forward passes per step plus a 2× larger MixUp batch.
 get_walltime() {
     local dataset="$1"
     local method="$2"
@@ -40,16 +42,19 @@ get_walltime() {
     local model="$4"
 
     case "${dataset}-${method}-${optim}-${model}" in
-        balanced-*-*-*) echo "0:40" ;;
-        imbalanced-*-sgd-*) echo "1:30" ;;
-        imbalanced-*-adam-*) echo "2:30" ;;
-        *) echo "2:30" ;;
+        balanced-asyco_divmix-*-*)         echo "1:30" ;;
+        balanced-*-*-*)                    echo "0:40" ;;
+        imbalanced-asyco_divmix-sgd-*)     echo "5:00" ;;
+        imbalanced-asyco_divmix-adam-*)    echo "6:00" ;;
+        imbalanced-*-sgd-*)                echo "1:30" ;;
+        imbalanced-*-adam-*)               echo "2:30" ;;
+        *)                                 echo "2:30" ;;
     esac
 }
 
 submitted=0
 for dataset in balanced imbalanced; do
-    for method in baseline sce elr asyco; do
+    for method in baseline sce elr asyco asyco_divmix; do
         for optim in sgd adam; do
             for model in resnet34_pretrained resnet34_scratch; do
                 walltime=$(get_walltime "${dataset}" "${method}" "${optim}" "${model}")
@@ -75,7 +80,7 @@ for dataset in balanced imbalanced; do
     done
 done
 
-echo "Submitted ${submitted} Stage 2 v2 selection jobs (expected 320)."
+echo "Submitted ${submitted} Stage 2 v2 selection jobs (expected 400)."
 echo
 echo "Monitor:   bjobs -w | grep ${JOB_PREFIX}_stage2_2"
 echo

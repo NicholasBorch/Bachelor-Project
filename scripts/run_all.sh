@@ -7,7 +7,7 @@
 # ╔════════════════════════════════════════════════════════════════════════╗
 # ║  THIS IS NOT THE RECOMMENDED WORKFLOW.                                 ║
 # ║                                                                        ║
-# ║  Stage 3 alone is ~2,700 GPU-hours; even on a fast single GPU that is  ║
+# ║  Stage 3 alone is ~3,400 GPU-hours; even on a fast single GPU that is  ║
 # ║  weeks to months of wall-clock time. For the real campaign, submit     ║
 # ║  jobs to the cluster via hpc/submit_stage*.sh at 10-12 parallel jobs.  ║
 # ║                                                                        ║
@@ -53,6 +53,10 @@ banner() {
     echo "════════════════════════════════════════════════════════════════"
 }
 
+# Method list — keep in sync with src/methods/__init__.py and
+# scripts/stage3_train.py.
+METHODS="baseline sce elr asyco asyco_divmix"
+
 banner "Stage 0 — prepare dataset"
 python -m scripts.stage0_prepare_dataset
 
@@ -87,7 +91,7 @@ python -m scripts.stage1e_human_comparison
 
 banner "Stage 2 — select epoch budgets (requires GPU)"
 for dataset in balanced imbalanced; do
-    for method in baseline sce elr asyco; do
+    for method in ${METHODS}; do
         for fold in $(seq 0 9); do
             python -m scripts.stage2_select_epoch_budget \
                 --dataset "${dataset}" --method "${method}" --fold "${fold}"
@@ -110,7 +114,7 @@ else
             --method baseline --dataset balanced \
             --init pretrained --optim sgd --tau 0.3 --fold 0
     else
-        echo "Full grid: 1,920 jobs single-threaded. You will be waiting a long time."
+        echo "Full grid: 2,400 jobs single-threaded. You will be waiting a long time."
         echo "Ctrl-C now and use hpc/submit_stage3.sh instead unless you really mean this."
         read -rp "Proceed anyway? [y/N] " reply
         if [[ ! "${reply}" =~ ^[Yy]$ ]]; then

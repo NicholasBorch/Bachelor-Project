@@ -1,7 +1,7 @@
 """Stage 3: the main training entry point.
 
 One invocation == one job == one (method, dataset, init, optim, tau, fold)
-tuple. The grid is 4 × 2 × 2 × 2 × 6 × 10 = 1,920 jobs total, as enumerated
+tuple. The grid is 5 × 2 × 2 × 2 × 6 × 10 = 2,400 jobs total, as enumerated
 by `hpc/generate_stage3_jobs.py`.
 
 Prerequisites validated at startup:
@@ -25,6 +25,9 @@ Run:
     python -m scripts.stage3_train \\
         --method elr --dataset imbalanced --init pretrained \\
         --optim sgd --tau 0.2 --fold 3
+    python -m scripts.stage3_train \\
+        --method asyco_divmix --dataset imbalanced --init pretrained \\
+        --optim adam --tau 0.3 --fold 0
 """
 from __future__ import annotations
 
@@ -40,6 +43,9 @@ from src.training.runner import run_training
 from src.utils.io import load_config, project_root
 from src.utils.manifest import write_manifest
 from src.utils.seed import fold_seed
+
+
+METHOD_CHOICES = ["baseline", "sce", "elr", "asyco", "asyco_divmix"]
 
 
 def _tau_dirname(tau: float) -> str:
@@ -207,7 +213,7 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(
         description="Stage 3: train one (method, dataset, init, optim, tau, fold) config"
     )
-    p.add_argument("--method", required=True, choices=["baseline", "sce", "elr", "asyco"])
+    p.add_argument("--method", required=True, choices=METHOD_CHOICES)
     p.add_argument("--dataset", required=True, choices=["balanced", "imbalanced"])
     p.add_argument("--init", required=True, choices=["pretrained", "scratch"])
     p.add_argument("--optim", required=True, choices=["sgd", "adam"])

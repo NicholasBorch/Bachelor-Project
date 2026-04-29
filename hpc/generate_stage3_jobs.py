@@ -1,21 +1,24 @@
 """Enumerate the Stage 3 experiment grid and emit LSF ``bsub`` commands.
 
-The full Stage 3 grid is 1,920 jobs::
+The full Stage 3 grid is 2,400 jobs::
 
-    4 methods × 2 datasets × 2 init × 2 optim × 6 tau × 10 folds = 1920
+    5 methods × 2 datasets × 2 init × 2 optim × 6 tau × 10 folds = 2400
+
+(Was 1,920 before ``asyco_divmix`` was added; the new method contributes
+the additional 480 jobs.)
 
 This script emits one ``bsub`` command per job to stdout (or ``--output-file``).
 It is filterable on every axis, which is essential for resubmission: if
-AsyCo fails on the imbalanced dataset, you can generate just those 240 jobs
-without rebuilding the whole pipeline by hand.
+AsyCo+DivMix fails on the imbalanced dataset, you can generate just those
+240 jobs without rebuilding the whole pipeline by hand.
 
 Usage::
 
-    # All 1920 jobs:
+    # All 2400 jobs:
     python -m hpc.generate_stage3_jobs > stage3_jobs.txt
 
-    # Only AsyCo on imbalanced:
-    python -m hpc.generate_stage3_jobs --method asyco --dataset imbalanced
+    # Only AsyCo+DivMix on imbalanced:
+    python -m hpc.generate_stage3_jobs --method asyco_divmix --dataset imbalanced
 
     # A single job (sanity check):
     python -m hpc.generate_stage3_jobs \\
@@ -35,7 +38,7 @@ from pathlib import Path
 
 import yaml
 
-METHODS: tuple[str, ...] = ("baseline", "sce", "elr", "asyco")
+METHODS: tuple[str, ...] = ("baseline", "sce", "elr", "asyco", "asyco_divmix")
 DATASETS: tuple[str, ...] = ("balanced", "imbalanced")
 INITS: tuple[str, ...] = ("pretrained", "scratch")
 OPTIMS: tuple[str, ...] = ("sgd", "adam")
@@ -45,7 +48,7 @@ FOLDS: tuple[int, ...] = tuple(range(10))
 EXPECTED_TOTAL: int = (
     len(METHODS) * len(DATASETS) * len(INITS) * len(OPTIMS) * len(TAUS) * len(FOLDS)
 )
-assert EXPECTED_TOTAL == 1920, "Grid math drifted — check the axes."
+assert EXPECTED_TOTAL == 2400, "Grid math drifted — check the axes."
 
 _HPC_DIR = Path(__file__).resolve().parent
 _DEFAULT_LSF_YAML = _HPC_DIR / "lsf_defaults.yaml"
@@ -208,7 +211,7 @@ def main() -> int:
 
     lines = [build_command(*coords, defaults=defaults) for coords in grid]
 
-    # Sanity check: with no filters, we must emit exactly 1920.
+    # Sanity check: with no filters, we must emit exactly EXPECTED_TOTAL.
     if (
         args.method is None
         and args.dataset is None

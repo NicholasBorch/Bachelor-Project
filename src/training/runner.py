@@ -16,6 +16,11 @@ Design constraints enforced here:
 
 - HamDataset returns (image, label, sample_index) — the sample_index is
   required by ELR's target buffer and must flow through every loader.
+- Methods declaring ``requires_two_views = True`` (currently only
+  ``asyco_divmix``) get their TRAIN dataset wrapped in
+  ``TwoViewHamDataset`` so each batch is (img1, img2, label, idx). The
+  TEST and VAL loaders are unaffected — both still produce single-view
+  batches for ``predict()``.
 - For the imbalanced dataset, a WeightedRandomSampler is used and CE losses
   are class-weighted via inverse frequency. For the balanced dataset, both
   are disabled and we rely on shuffled sampling + unweighted CE (consistent
@@ -25,9 +30,9 @@ Design constraints enforced here:
   None`; when it is None (Stage 2), we never build a test loader and never
   evaluate on it.
 - NTA/LNMR require a SECOND pass over the training set with test-time
-  transforms (no augmentation). This runs only when `test_df is not None`
-  and `dx_clean` exists on `train_df`. Cost is one forward pass over the
-  training set at the end of training.
+  transforms (no augmentation). This runs only when `test_df is not
+  None` and `dx_clean` exists on `train_df`. Cost is one forward pass over
+  the training set at the end of training.
 - All artifacts — the resolved config, the per-epoch log, and (when a test
   set is provided) the final test metrics enriched with NTA/LNMR — are
   written to `output_dir` so downstream analysis has a single place to look.
@@ -47,6 +52,7 @@ from torch.utils.data import DataLoader
 
 from src.data.ham10000 import CLASS_NAMES, NUM_CLASSES, HamDataset
 from src.data.transforms import get_test_transforms, get_train_transforms
+from src.data.two_view import TwoViewHamDataset
 from src.methods import build_method
 from src.models.resnet import build_resnet
 from src.training.metrics import compute_metrics, compute_noise_label_interaction
@@ -90,8 +96,14 @@ def _build_loaders(
     images_dir: Path,
     cfg: dict,
     val_df: pd.DataFrame | None,
+    requires_two_views: bool = False,
 ) -> tuple[DataLoader, DataLoader | None, DataLoader | None, np.ndarray]:
-    """Construct train / (optional test) / (optional val) DataLoaders."""
+    """Construct train / (optional test) / (optional val) DataLoaders.
+
+    When ``requires_two_views`` is True, the TRAIN dataset is wrapped in
+    ``TwoViewHamDataset`` so each item is (img1, img2, label, idx) instead
+    of (img, label, idx). Test and val loaders are unchanged regardless.
+    """
     image_size = int(cfg["image_size"])
     resize_size = int(round(image_size * 256 / 224))
     batch_size = int(cfg["data"]["batch_size"])
@@ -101,7 +113,14 @@ def _build_loaders(
     train_tf = get_train_transforms(image_size=image_size)
     test_tf = get_test_transforms(image_size=image_size, resize_size=resize_size)
 
-    train_ds = HamDataset(train_df, images_dir=images_dir, transform=train_tf)
+    if requires_two_views:
+        # Build the base PIL-cache once with transform=None, then wrap.
+        # The wrapper applies train_tf twice per __getitem__ on the cached PIL.
+        base_train = HamDataset(train_df, images_dir=images_dir, transform=None)
+        train_ds: torch.utils.data.Dataset = TwoViewHamDataset(base_train, transform=train_tf)
+    else:
+        train_ds = HamDataset(train_df, images_dir=images_dir, transform=train_tf)
+
     test_ds = (
         HamDataset(test_df, images_dir=images_dir, transform=test_tf)
         if test_df is not None else None
@@ -167,7 +186,9 @@ def _predict_on_train_set(
     Using test-time transforms (no augmentation, deterministic
     resize+centercrop) is essential: NTA/LNMR should reflect what the
     trained model thinks about each image, not what it thinks about a
-    single random augmented view of it.
+    single random augmented view of it. Always uses the standard
+    single-view ``HamDataset`` regardless of the method's training-time
+    two-view requirement.
     """
     image_size = int(cfg["image_size"])
     resize_size = int(round(image_size * 256 / 224))
@@ -214,7 +235,7 @@ def run_training(
             test evaluation is performed and no `test_metrics.json` is
             written — Stage 2 mode.
         images_dir: directory with the JPEGs referenced by `image_id`.
-        method_name: one of "baseline", "sce", "elr", "asyco".
+        method_name: one of "baseline", "sce", "elr", "asyco", "asyco_divmix".
         total_epochs: the epoch budget (cosine-annealing T_max).
         output_dir: where to write `config.yaml`, `training_log.jsonl`,
             and (Stage 3) `test_metrics.json`.
@@ -251,9 +272,17 @@ def run_training(
     }
     save_yaml(resolved, output_dir / "config.yaml")
 
+    # Probe the method class for its two-view requirement BEFORE building
+    # loaders. Importing here keeps the dependency local to this function
+    # and avoids circular imports.
+    from src.methods import build_method as _bm  # noqa: F401 (already imported above)
+    from src.methods.base import Method as _MethodCls  # noqa: F401
+    # The flag lives on the class; query via the registry.
+    requires_two_views = _method_requires_two_views(method_name)
+
     train_loader, test_loader, val_loader, train_labels_idx = _build_loaders(
         train_df=train_df, test_df=test_df, images_dir=images_dir,
-        cfg=cfg, val_df=val_df,
+        cfg=cfg, val_df=val_df, requires_two_views=requires_two_views,
     )
 
     class_weights = None
@@ -358,3 +387,31 @@ def run_training(
         json.dump(test_metrics, f, indent=2, default=float)
 
     return test_metrics
+
+
+def _method_requires_two_views(method_name: str) -> bool:
+    """Look up the ``requires_two_views`` flag on the method class without
+    instantiating the method (which needs a built cfg + device).
+
+    The mapping mirrors ``build_method`` in ``src.methods.__init__``.
+    Keeping this lookup local to the runner avoids modifying the
+    factory's signature and keeps the method classes the single source
+    of truth for the flag value.
+    """
+    from src.methods.baseline import BaselineMethod
+    from src.methods.sce import SCEMethod
+    from src.methods.elr import ELRMethod
+    from src.methods.asyco import AsyCoMethod
+    from src.methods.asyco_divmix import AsyCoDivMixMethod
+
+    name = method_name.lower()
+    cls_map = {
+        "baseline": BaselineMethod,
+        "sce": SCEMethod,
+        "elr": ELRMethod,
+        "asyco": AsyCoMethod,
+        "asyco_divmix": AsyCoDivMixMethod,
+    }
+    if name not in cls_map:
+        raise ValueError(f"Unknown method: {method_name}")
+    return bool(getattr(cls_map[name], "requires_two_views", False))

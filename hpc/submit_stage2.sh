@@ -1,22 +1,26 @@
 #!/bin/bash
 # hpc/submit_stage2.sh
 #
-# Submit epoch-budget selection jobs. Grid: 2 datasets × 4 methods × 10
-# folds = 80 jobs. Each trains the method on clean (τ=0) training folds
+# Submit epoch-budget selection jobs. Grid: 2 datasets × 5 methods × 10
+# folds = 100 jobs. Each trains the method on clean (τ=0) training folds
 # for up to 100 epochs and logs validation metrics per epoch. Aggregation
 # picks the median convergence epoch per (dataset, method).
 #
 # Walltime rationale (ResNet-34 ~1.5× faster than ResNet-50):
 #
-#                    obs @ 25 ep     @ 100 ep     walltime  margin
-#   baseline/SCE/ELR balanced:    ~9 min         ~36 min       2:00     ~84 min
-#   baseline/SCE/ELR imbalanced:  ~93 min        ~370 min      12:00    ~350 min
-#   AsyCo balanced:                ~24 min        ~96 min       4:00     ~144 min
-#   AsyCo imbalanced:              ~233 min       ~930 min      24:00    ~510 min
+#                                  obs @ 25 ep     @ 100 ep     walltime  margin
+#   baseline/SCE/ELR balanced:     ~9 min          ~36 min       2:30     ~114 min
+#   baseline/SCE/ELR imbalanced:   ~93 min         ~370 min      15:00    ~530 min
+#   AsyCo balanced:                ~24 min         ~96 min       5:00     ~204 min
+#   AsyCo imbalanced:              ~233 min        ~930 min      23:59    ~510 min
+#   AsyCo+DivMix balanced:         ~50 min (~2×)   ~200 min      8:00     ~280 min
+#   AsyCo+DivMix imbalanced:       ~470 min (~2×)  ~1880 min     23:59    capped
 #
 # (In practice Stage 2 usually converges well before 100 epochs, but the
 # walltimes are sized for the worst case so that no selection run dies
-# mid-convergence and wastes the fold.)
+# mid-convergence and wastes the fold. AsyCo+DivMix imbalanced @ 100 ep
+# IS at risk of hitting the 24h cap — the early-convergence assumption
+# matters more for it than for any other (dataset, method) pair.)
 #
 # Usage:
 #   bash hpc/submit_stage2.sh
@@ -38,17 +42,19 @@ get_walltime() {
     local dataset="$1"
     local method="$2"
     case "${dataset}-${method}" in
-        balanced-baseline|balanced-sce|balanced-elr)    echo "2:30" ;;
-        balanced-asyco)                                  echo "5:00" ;;
-        imbalanced-baseline|imbalanced-sce|imbalanced-elr) echo "15:00" ;;
-        imbalanced-asyco)                                 echo "23:59" ;;
+        balanced-baseline|balanced-sce|balanced-elr)            echo "2:30" ;;
+        balanced-asyco)                                          echo "5:00" ;;
+        balanced-asyco_divmix)                                   echo "8:00" ;;
+        imbalanced-baseline|imbalanced-sce|imbalanced-elr)       echo "15:00" ;;
+        imbalanced-asyco)                                        echo "23:59" ;;
+        imbalanced-asyco_divmix)                                 echo "23:59" ;;
         *) echo "23:59" ;;  # conservative fallback
     esac
 }
 
 submitted=0
 for dataset in balanced imbalanced; do
-    for method in baseline sce elr asyco; do
+    for method in baseline sce elr asyco asyco_divmix; do
         walltime=$(get_walltime "${dataset}" "${method}")
         for fold in $(seq 0 9); do
             fold_padded=$(printf '%02d' "${fold}")
@@ -70,13 +76,13 @@ for dataset in balanced imbalanced; do
     done
 done
 
-echo "Submitted ${submitted} Stage 2 selection jobs (expected 80)."
+echo "Submitted ${submitted} Stage 2 selection jobs (expected 100)."
 echo
 echo "Monitor:   bjobs -w | grep ${JOB_PREFIX}_stage2"
 echo
-echo "After all 80 jobs finish, aggregate per (dataset, method):"
+echo "After all 100 jobs finish, aggregate per (dataset, method):"
 echo "  for dataset in balanced imbalanced; do"
-echo "    for method in baseline sce elr asyco; do"
+echo "    for method in baseline sce elr asyco asyco_divmix; do"
 echo "      python -m scripts.stage2_aggregate_epoch_budget --dataset \${dataset} --method \${method}"
 echo "    done"
 echo "  done"
