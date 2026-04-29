@@ -42,12 +42,12 @@ get_walltime() {
     local model="$4"
 
     case "${dataset}-${method}-${optim}-${model}" in
-        balanced-asyco_divmix-*-*)         echo "1:30" ;;
-        balanced-*-*-*)                    echo "0:40" ;;
-        imbalanced-asyco_divmix-sgd-*)     echo "5:00" ;;
-        imbalanced-asyco_divmix-adam-*)    echo "6:00" ;;
-        imbalanced-*-sgd-*)                echo "1:30" ;;
-        imbalanced-*-adam-*)               echo "2:30" ;;
+        balanced-asyco_divmix-*-*)         echo "1:00" ;;
+        balanced-*-*-*)                    echo "0:30" ;;
+        imbalanced-asyco_divmix-sgd-*)     echo "6:30" ;;
+        imbalanced-asyco_divmix-adam-*)    echo "6:30" ;;
+        imbalanced-*-sgd-*)                echo "2:00" ;;
+        imbalanced-*-adam-*)               echo "2:00" ;;
         *)                                 echo "2:30" ;;
     esac
 }
