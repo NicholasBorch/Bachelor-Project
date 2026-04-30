@@ -52,7 +52,7 @@ def _load_clean_train(cfg: dict, dataset: str, fold: int) -> pd.DataFrame:
     short-circuit construction contains the clean labels.
     """
     root = project_root()
-    tau_dir = _tau_dirname(0.0)
+    tau_dir = _tau_dirname(0.2)
     path = (
         root / cfg["paths"]["cv_folds"] / dataset
         / "feature_driven" / tau_dir / f"fold_{fold:02d}" / "train_noisy.csv"

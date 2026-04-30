@@ -20,6 +20,8 @@ env/
 .DS_Store
 Thumbs.db
 
+# Logs
+logs/
 
 # Temporary
 setup.md
