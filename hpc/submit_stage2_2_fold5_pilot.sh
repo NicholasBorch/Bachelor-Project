@@ -12,7 +12,7 @@ MEM_PER_CORE_MB=${MEM_PER_CORE_MB:-8000}
 GPU_SPEC=${GPU_SPEC:-"num=1:mode=exclusive_process"}
 LOG_DIR=${LOG_DIR:-logs}
 JOB_PREFIX=${JOB_PREFIX:-thesis}
-FOLD=${FOLD:-5}
+FOLD=${FOLD:-3}
 
 mkdir -p "${LOG_DIR}"
 
