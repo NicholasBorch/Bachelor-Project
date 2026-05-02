@@ -25,6 +25,7 @@ def load_curve(path: Path):
 
     epochs = [r.get("epoch", i + 1) for i, r in enumerate(rows)]
     val_ba = [r["val_balanced_accuracy"] for r in rows]
+
     return epochs, val_ba
 
 
@@ -39,9 +40,11 @@ for dataset in datasets:
                         root / tau / dataset / method / optim / model
                         / fold / "training_log.jsonl"
                     )
+
                     if not log_path.exists():
                         print("Missing:", log_path)
                         continue
+
                     curves[tau] = load_curve(log_path)
 
                 if not curves:
@@ -51,18 +54,27 @@ for dataset in datasets:
 
                 for tau, (epochs, val_ba) in curves.items():
                     best_epoch = epochs[val_ba.index(max(val_ba))]
-                    label = f"{tau} (best={best_epoch}, max={max(val_ba):.3f})"
-                    plt.plot(epochs, val_ba, linewidth=1.4, label=label)
+                    best_val = max(val_ba)
+
+                    plt.plot(
+                        epochs,
+                        val_ba,
+                        linewidth=1.4,
+                        label=f"{tau} (best={best_epoch}, max={best_val:.3f})",
+                    )
                     plt.axvline(best_epoch, linestyle="--", alpha=0.35)
 
                 plt.xlabel("epoch")
-                plt.ylabel("val balanced accuracy")
+                plt.ylabel("clean validation balanced accuracy")
                 plt.title(f"{dataset} / {method} / {optim} / {model} / fold_05")
                 plt.grid(alpha=0.3)
                 plt.legend()
                 plt.tight_layout()
 
-                out_path = out / f"{dataset}_{method}_{optim}_{model}_fold05_tau00_vs_tau20.png"
+                out_path = (
+                    out
+                    / f"{dataset}_{method}_{optim}_{model}_fold05_tau00_vs_tau20.png"
+                )
                 plt.savefig(out_path, dpi=150)
                 plt.close()
 

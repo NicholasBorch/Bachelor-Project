@@ -6,7 +6,10 @@
 #   = 32 jobs
 #
 # Runs fold 5 for tau=0.0 and tau=0.2.
-# Outputs go to:
+# Training uses noisy labels for tau=0.2.
+# Validation uses clean labels.
+#
+# Outputs:
 #   results/pilot_stage2_tau_fold5/tau_00/...
 #   results/pilot_stage2_tau_fold5/tau_20/...
 

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
 import pandas as pd
 from sklearn.model_selection import StratifiedShuffleSplit
@@ -23,12 +22,15 @@ def _tau_dirname(tau: float) -> str:
 def _load_train(cfg: dict, dataset: str, tau: float, fold: int) -> pd.DataFrame:
     root = project_root()
     tau_dir = _tau_dirname(tau)
+
     path = (
         root / cfg["paths"]["cv_folds"] / dataset
         / "feature_driven" / tau_dir / f"fold_{fold:02d}" / "train_noisy.csv"
     )
+
     if not path.exists():
         raise FileNotFoundError(f"Missing train CSV: {path}")
+
     return pd.read_csv(path)
 
 
@@ -42,11 +44,13 @@ def _carve_val_split(
         test_size=val_frac,
         random_state=int(seed),
     )
+
     train_idx, val_idx = next(splitter.split(train_df["image_id"], train_df["dx"]))
-    return (
-        train_df.iloc[train_idx].reset_index(drop=True),
-        train_df.iloc[val_idx].reset_index(drop=True),
-    )
+
+    train_part = train_df.iloc[train_idx].reset_index(drop=True)
+    val_part = train_df.iloc[val_idx].reset_index(drop=True)
+
+    return train_part, val_part
 
 
 def main(args: argparse.Namespace) -> int:
@@ -61,19 +65,29 @@ def main(args: argparse.Namespace) -> int:
     root = project_root()
 
     train_full = _load_train(cfg, args.dataset, args.tau, args.fold)
+
     train_df, val_df = _carve_val_split(
         train_full,
         seed=int(cfg["seed"]),
         val_frac=0.15,
     )
 
+    # Training uses the noisy label column `dx`.
+    # Validation must use clean labels, so overwrite val_df["dx"] with dx_clean.
+    if "dx_clean" not in val_df.columns:
+        raise ValueError("Expected dx_clean column in validation dataframe.")
+
+    val_df = val_df.copy()
+    val_df["dx"] = val_df["dx_clean"]
+
     tau_dir = _tau_dirname(args.tau)
 
     print(
-        f"[stage2-pilot-tau] dataset={args.dataset} method={args.method} "
-        f"optim={args.optim} model={args.model} tau={args.tau:.2f} "
-        f"fold={args.fold} train={len(train_df)} val={len(val_df)} "
-        f"cap={cfg['epoch_cap']}"
+        f"[stage2-pilot-tau] dataset={args.dataset} "
+        f"method={args.method} optim={args.optim} model={args.model} "
+        f"tau={args.tau:.2f} fold={args.fold} "
+        f"train={len(train_df)} val={len(val_df)} "
+        f"cap={cfg['epoch_cap']} validation_labels=clean"
     )
 
     images_dir = root / cfg["paths"]["images"]
@@ -116,6 +130,7 @@ def main(args: argparse.Namespace) -> int:
             "fold": int(args.fold),
             "epoch_cap": int(cfg["epoch_cap"]),
             "val_fraction": 0.15,
+            "validation_labels": "clean",
         },
         outputs=[
             str(out_dir / "config.yaml"),
@@ -129,7 +144,7 @@ def main(args: argparse.Namespace) -> int:
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(
-        description="Stage 2 pilot: fold 5 tau=0 vs tau=0.2"
+        description="Stage 2 pilot: fold 5 tau=0 vs tau=0.2 with clean validation labels"
     )
     p.add_argument("--dataset", required=True, choices=["balanced", "imbalanced"])
     p.add_argument("--method", required=True, choices=METHOD_CHOICES)
@@ -141,4 +156,5 @@ if __name__ == "__main__":
     )
     p.add_argument("--tau", required=True, type=float, choices=[0.0, 0.2])
     p.add_argument("--fold", type=int, default=5)
+
     sys.exit(main(p.parse_args()))
