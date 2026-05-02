@@ -2,15 +2,15 @@ import json
 from pathlib import Path
 import matplotlib.pyplot as plt
 
-root = Path("results/epoch_selection_v2/epoch_selection_v2")
-out = Path("results/stage2_pilot_plots")
+root = Path("results/pilot_stage2_tau20_fold03")
+out = Path("results/pilot_stage2_tau20_fold03/plots")
 out.mkdir(parents=True, exist_ok=True)
 
 datasets = ["balanced", "imbalanced"]
 methods = ["elr", "asyco_divmix"]
 optims = ["sgd", "adam"]
 models = ["resnet34_pretrained", "resnet34_scratch"]
-fold = "fold_05"
+fold = "fold_03"
 
 for dataset in datasets:
     for method in methods:
@@ -43,7 +43,7 @@ for dataset in datasets:
                 plt.grid(alpha=0.3)
                 plt.tight_layout()
 
-                out_path = out / f"{dataset}_{method}_{optim}_{model}_fold05.png"
+                out_path = out / f"{dataset}_{method}_{optim}_{model}_fold{fold}.png"
                 plt.savefig(out_path, dpi=150)
                 plt.close()
 
