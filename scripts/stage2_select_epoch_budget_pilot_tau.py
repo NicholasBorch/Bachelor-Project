@@ -93,7 +93,7 @@ def main(args: argparse.Namespace) -> int:
     images_dir = root / cfg["paths"]["images"]
 
     out_dir = (
-        root / cfg["paths"]["results"] / "pilot_stage2_tau_fold5"
+        root / cfg["paths"]["results"] / "pilot_stage2_tau_fold5_configs_0"
         / tau_dir / args.dataset / args.method / args.optim / args.model
         / f"fold_{args.fold:02d}"
     )

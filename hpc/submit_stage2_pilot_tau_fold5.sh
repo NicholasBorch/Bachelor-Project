@@ -35,7 +35,7 @@ get_walltime() {
     case "${dataset}-${method}-${optim}-${model}-${tau}" in
         balanced-asyco_divmix-*-*-*)      echo "1:00" ;;
         balanced-*-*-*-*)                 echo "0:30" ;;
-        imbalanced-asyco_divmix-*-*-*)    echo "6:30" ;;
+        imbalanced-asyco_divmix-*-*-*)    echo "4:30" ;;
         imbalanced-*-*-*-*)               echo "2:00" ;;
         *)                                echo "2:30" ;;
     esac
