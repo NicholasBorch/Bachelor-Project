@@ -4,7 +4,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 
-root = Path("results/pilot_stage2_tau_fold5")
+root = Path("results/pilot_stage2_tau_fold5_configs_0")
 out = root / "plots"
 out.mkdir(parents=True, exist_ok=True)
 
