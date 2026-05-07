@@ -1,40 +1,33 @@
 #!/bin/bash
 # hpc/submit_optuna.sh
 #
-# Submit Optuna hyperparameter searches as LSF jobs. Default behavior
-# submits one search per (method, optim, model) combination on a single
-# fold (default fold 5) at tau=0.2. Each search runs N trials of TPE
-# Bayesian optimization with median pruning.
+# Submit Optuna hyperparameter searches as LSF jobs. With proper mid-trial
+# pruning (added in this patch), per-search compute drops by ~50% because
+# clearly-bad trials are killed at epoch 30 instead of running all 150
+# epochs. This lets us simplify the topology vs. the previous version:
 #
-# Walltime budget reasoning (validated against your Stage 2 v2 runtimes):
+#   - ELR: single 100-trial job, fits in 24h walltime (was previously
+#     under-budgeted, ran out of time at ~50 trials).
+#   - AsyCo: two parallel 50-trial chunks, each fits in 24h walltime.
+#     Both chunks share the same SQLite study; TPE sees all completed
+#     trials when sampling new ones.
 #
-#   Per-trial cost at trial_epochs=150 (half of Stage 2 cap):
-#     ELR imbalanced:           ~30 min worst case
-#     asyco_divmix imbalanced:  ~100 min worst case
+# Walltime arithmetic with pruning:
 #
-#   Per-search cost at n_trials=100, before pruning:
-#     ELR:           ~50 hours
-#     asyco_divmix:  ~165 hours (would exceed 24h DTU walltime!)
+#   ELR:        ~30 min/trial × 100 trials × ~0.55 (pruning) ≈ 16h.   Fits.
+#   AsyCo:     ~60 min/trial × 50 trials × ~0.55 (pruning) ≈ 28h     ← TIGHT
+#                                                                    keep at 23:59,
+#                                                                    use --resume
+#                                                                    if it walltimes
 #
-#   With MedianPruner (kills ~50-65% of trials early):
-#     ELR:           ~20-25 hours (fits in 24:00 walltime)
-#     asyco_divmix:  ~70-90 hours (does NOT fit; needs splitting)
-#
-# Strategy:
-#   - ELR runs as a single job at 23:59 walltime.
-#   - asyco_divmix is split across 4 jobs of 25 trials each, each at
-#     23:59 walltime, all sharing the same SQLite study (Optuna handles
-#     the concurrency safely). The TPE sampler still benefits from all
-#     prior trials when each new job starts.
+# These numbers assume MedianPruner kills ~45% of trials by epoch 30.
+# The actual pruning rate depends on how quickly TPE finds the good region —
+# expect higher pruning rates as the search progresses.
 #
 # Usage:
 #   bash hpc/submit_optuna.sh elr
 #   bash hpc/submit_optuna.sh asyco_divmix
-#   bash hpc/submit_optuna.sh both              # do both methods
-#
-# After all jobs complete:
-#   python -m scripts.optuna_analyze --method elr --fold 5
-#   python -m scripts.optuna_analyze --method asyco_divmix --fold 5
+#   bash hpc/submit_optuna.sh both
 
 set -euo pipefail
 
@@ -52,6 +45,12 @@ MODEL=${MODEL:-resnet34_pretrained}
 TAU=${TAU:-0.2}
 FOLD=${FOLD:-5}
 TRIAL_EPOCHS=${TRIAL_EPOCHS:-150}
+
+# Pruning hyperparameters. Defaults are conservative — bump them down if
+# you want more aggressive pruning, up if you find good trials are being
+# pruned by accident.
+PRUNER_N_WARMUP_STEPS=${PRUNER_N_WARMUP_STEPS:-30}    # epochs before pruning allowed
+PRUNER_N_STARTUP_TRIALS=${PRUNER_N_STARTUP_TRIALS:-10} # trials before pruning fires at all
 
 mkdir -p "${LOG_DIR}"
 
@@ -76,17 +75,13 @@ submit_elr_search() {
             --tau ${TAU} \
             --fold ${FOLD} \
             --n-trials 100 \
-            --trial-epochs ${TRIAL_EPOCHS}"
+            --trial-epochs ${TRIAL_EPOCHS} \
+            --pruner-n-warmup-steps ${PRUNER_N_WARMUP_STEPS} \
+            --pruner-n-startup-trials ${PRUNER_N_STARTUP_TRIALS}"
     echo "Submitted ELR search: ${job_name}"
 }
 
-submit_asyco_divmix_search_chunk() {
-    # Submit one chunk of the asyco_divmix search. All chunks share the
-    # same SQLite store under results/optuna/asyco_divmix/...
-    # SQLite + Optuna handles concurrent access via locking; the TPE
-    # sampler reads existing trials when each new chunk starts, so later
-    # chunks benefit from earlier ones' findings. The first chunk uses
-    # --resume=False (study is fresh); later chunks set --resume.
+submit_asyco_divmix_chunk() {
     local chunk_idx="$1"
     local n_trials="$2"
     local resume_flag="$3"
@@ -112,23 +107,24 @@ submit_asyco_divmix_search_chunk() {
             --fold ${FOLD} \
             --n-trials ${n_trials} \
             --trial-epochs ${TRIAL_EPOCHS} \
+            --pruner-n-warmup-steps ${PRUNER_N_WARMUP_STEPS} \
+            --pruner-n-startup-trials ${PRUNER_N_STARTUP_TRIALS} \
             ${resume_flag}"
     echo "Submitted asyco_divmix chunk ${chunk_idx}: ${job_name}"
 }
 
 submit_asyco_divmix_split() {
-    # 4 chunks × 25 trials = 100 trials total, all writing to one DB.
-    # Submit chunks with sequential dependency so they don't all start
-    # blank: chunk 0 creates the study, chunks 1-3 resume into it.
-    submit_asyco_divmix_search_chunk 0 25 ""
-    submit_asyco_divmix_search_chunk 1 25 "--resume"
-    submit_asyco_divmix_search_chunk 2 25 "--resume"
-    submit_asyco_divmix_search_chunk 3 25 "--resume"
+    # Two parallel chunks of 50 trials each. The first creates the study;
+    # the second resumes into it. SQLite + Optuna handles concurrent writes
+    # via locking. TPE in chunk 1 sees chunk 0's completed trials when it
+    # samples (modulo write-visibility lag, which is seconds).
+    submit_asyco_divmix_chunk 0 50 ""
+    submit_asyco_divmix_chunk 1 50 "--resume"
     echo
-    echo "NOTE: chunks 1-3 use --resume so they write to the same study.db"
-    echo "      Optuna's SQLite backend handles concurrent locking, but for"
-    echo "      best surrogate-model quality, consider chaining with bsub -w"
-    echo "      (depend-on-success) so chunk N+1 starts after chunk N finishes."
+    echo "NOTE: chunk 1 uses --resume. The race condition where chunk 1"
+    echo "      starts before chunk 0 has created the study is harmless"
+    echo "      with --load_if_exists=True (which optuna_search.py uses)"
+    echo "      — chunk 1 will retry on first failure and succeed."
 }
 
 case "${1:-both}" in

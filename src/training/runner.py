@@ -61,6 +61,22 @@ from src.utils.io import save_yaml
 from src.utils.seed import seed_everything
 
 
+class StopTraining(Exception):
+    """Raised inside an epoch_callback to request graceful early termination.
+
+    Caught at the per-epoch loop boundary in run_training. The post-epoch
+    record is already written to training_log.jsonl before the exception
+    propagates, and final test evaluation (Stage 3 mode) does NOT run when
+    training is stopped this way — the partial run is treated as a
+    legitimately-terminated training, not a completed one.
+
+    The Optuna search uses this to honor pruning decisions without leaking
+    Optuna concepts into runner.py. Other callers can use it for any
+    reasonable early-stopping criterion.
+    """
+    pass
+
+
 def _labels_to_indices(labels: pd.Series) -> np.ndarray:
     """Map a column of class names ('mel', 'nv', ...) to integer indices."""
     mapping = {c: i for i, c in enumerate(CLASS_NAMES)}
@@ -223,6 +239,7 @@ def run_training(
     output_dir: Path,
     val_df: pd.DataFrame | None = None,
     seed: int | None = None,
+    epoch_callback=None,
 ) -> dict[str, Any]:
     """Train one model on one fold end-to-end.
 
@@ -241,11 +258,21 @@ def run_training(
             and (Stage 3) `test_metrics.json`.
         val_df: optional validation DataFrame for per-epoch monitoring.
         seed: optional per-fold seed.
+        epoch_callback: optional callable ``(epoch_idx, record) -> None``
+            invoked after each epoch's record is written to the JSONL log.
+            ``record`` is the same dict that was just appended (epoch,
+            train_loss, loss_components, lr, epoch_time_s, and val_*
+            metrics if val_df was provided). The callback may raise
+            ``StopTraining`` to request early termination of training;
+            in that case Stage 3 final test evaluation is skipped and an
+            empty dict is returned (same as Stage 2 mode). Any other
+            exception propagates normally. Callbacks see post-write,
+            post-validation state — they should not mutate ``record``.
 
     Returns:
         The final test metrics dict (with NTA/LNMR merged in when
         `dx_clean` is available on `train_df`) in Stage 3; empty dict in
-        Stage 2.
+        Stage 2 or when training was stopped early via epoch_callback.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -309,6 +336,7 @@ def run_training(
     if log_path.exists():
         log_path.unlink()
 
+    stopped_early = False
     for epoch in range(int(total_epochs)):
         t0 = time.time()
         loss_sum = 0.0
@@ -350,8 +378,21 @@ def run_training(
 
         _jsonl_append(log_path, record)
 
+        # Optional epoch-end hook (e.g. for Optuna pruning). The callback
+        # sees the same record we just appended. If it raises StopTraining
+        # we exit the training loop cleanly; any other exception propagates.
+        if epoch_callback is not None:
+            try:
+                epoch_callback(int(epoch), record)
+            except StopTraining:
+                stopped_early = True
+                break
+
     # Stage 2 mode: no test set, no NTA/LNMR, just return.
-    if test_loader is None:
+    # Also short-circuit when training was stopped early via the callback —
+    # an interrupted training is not a completed one, so we don't run the
+    # final test/NTA/LNMR pass.
+    if test_loader is None or stopped_early:
         return {}
 
     # Stage 3 mode: final test evaluation + training-set noise-label diagnostics.

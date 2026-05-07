@@ -68,7 +68,7 @@ from sklearn.model_selection import StratifiedShuffleSplit
 # IMPORTANT: this import path assumes you've placed the search-space
 # definitions at configs/optuna_search_spaces.py (see file 1 of this patch).
 from configs.optuna_search_spaces import sample as sample_hyperparams
-from src.training.runner import run_training
+from src.training.runner import run_training, StopTraining
 from src.utils.io import load_config, project_root
 from src.utils.seed import fold_seed
 
@@ -172,6 +172,66 @@ def _peak_val_balanced_accuracy(log_path: Path, smooth_window: int = 5) -> tuple
     return float(smoothed[best_idx]), best_idx
 
 
+def _make_pruning_callback(
+    trial: optuna.Trial,
+    smooth_window: int = 5,
+    min_epoch_for_pruning: int = 0,
+):
+    """Build an epoch_callback that reports smoothed val BA to Optuna and
+    raises StopTraining if Optuna's pruner says so.
+
+    Args:
+        trial: the active Optuna trial. We call ``trial.report`` and
+            ``trial.should_prune`` on it once per epoch.
+        smooth_window: trailing moving-average window applied to
+            ``val_balanced_accuracy`` before reporting. Matches the same
+            smoothing used to compute the final objective.
+        min_epoch_for_pruning: don't allow pruning before this epoch.
+            Useful for protecting AsyCo's warmup → post-warmup transition,
+            since the BA reading at epoch 0-15 is on a fundamentally
+            different model than what we'd get post-rampup.
+
+    Returns:
+        A callable ``(epoch, record) -> None`` suitable for
+        ``run_training(epoch_callback=...)``.
+    """
+    history: list[float] = []
+
+    def _callback(epoch: int, record: dict) -> None:
+        # Skip if val metrics weren't computed this epoch (shouldn't happen
+        # in practice for the search since we always pass val_df, but be
+        # defensive).
+        ba = record.get("val_balanced_accuracy")
+        if ba is None or not (isinstance(ba, (int, float)) and ba == ba):  # NaN check
+            return
+
+        history.append(float(ba))
+        # Trailing moving average; consistent with how the final objective
+        # is computed by _peak_val_balanced_accuracy.
+        lo = max(0, len(history) - smooth_window)
+        smoothed = sum(history[lo:]) / max(len(history) - lo, 1)
+
+        # Report to Optuna. The "step" is the epoch index — Optuna's
+        # MedianPruner uses these to compare across trials at matched steps.
+        trial.report(smoothed, step=int(epoch))
+
+        # Don't allow pruning before the configured minimum epoch.
+        if int(epoch) < int(min_epoch_for_pruning):
+            return
+
+        if trial.should_prune():
+            # Raise StopTraining to gracefully stop the runner. The runner
+            # catches this at the loop boundary and returns. Then we re-raise
+            # optuna.TrialPruned in the objective wrapper so Optuna correctly
+            # records this trial as pruned (not failed, not completed).
+            raise StopTraining(
+                f"Optuna pruning at epoch {epoch} "
+                f"(smoothed val BA = {smoothed:.4f})"
+            )
+
+    return _callback
+
+
 def make_objective(
     args: argparse.Namespace,
     base_cfg: dict,
@@ -191,16 +251,15 @@ def make_objective(
         hp = sample_hyperparams(args.method, trial)
         cfg = _apply_hyperparams_to_cfg(base_cfg, args.method, hp)
 
-        # Plumb the trial's pruning callback into the runner. The runner
-        # does NOT currently call optuna.report — we work around this by
-        # post-processing the training log every few epochs in the
-        # IntermediateValueReporterCallback (see callback class below).
-        # For simplicity in this first version, we let trials run to
-        # completion and rely on Optuna's pruning to be effective via
-        # the median-of-completed-trials criterion at trial end.
-        # (Full mid-trial pruning would require modifying runner.py to
-        # accept a callback hook; see TODO at bottom of this file.)
+        # Build the per-epoch pruning callback. The runner calls this
+        # after each epoch's metrics are appended to training_log.jsonl.
+        pruning_cb = _make_pruning_callback(
+            trial,
+            smooth_window=int(args.objective_smooth_window),
+            min_epoch_for_pruning=int(args.pruner_n_warmup_steps),
+        )
 
+        was_pruned = False
         try:
             run_training(
                 cfg=cfg,
@@ -212,33 +271,41 @@ def make_objective(
                 output_dir=trial_dir,
                 val_df=val_df,
                 seed=fold_seed(int(cfg["seed"]), int(args.fold)),
+                epoch_callback=pruning_cb,
             )
+        except StopTraining as e:
+            # Pruning fired. Mark this trial as pruned so Optuna's bookkeeping
+            # is correct (pruned trials inform TPE's surrogate model differently
+            # than failed/completed trials).
+            print(f"[trial {trial.number}] PRUNED: {e}", flush=True)
+            was_pruned = True
         except Exception as e:
             print(f"[trial {trial.number}] FAILED: {type(e).__name__}: {e}",
-                  file=sys.stderr)
-            # Save the failure for later inspection
+                  file=sys.stderr, flush=True)
             with (trial_dir / "trial_summary.json").open("w") as f:
                 json.dump({"failed": True, "error": str(e), "params": hp}, f, indent=2)
-            # Return -inf so Optuna knows this trial is bad without
-            # crashing the study. Don't `raise` — that would abort the
-            # whole search.
             return float("-inf")
 
         # Post-training: extract peak smoothed validation balanced accuracy.
         log_path = trial_dir / "training_log.jsonl"
         peak_ba, peak_epoch = _peak_val_balanced_accuracy(log_path)
 
-        # Persist the trial summary in a human-readable form alongside
-        # Optuna's own DB row.
         summary = {
             "trial_number": int(trial.number),
             "params": hp,
             "peak_val_balanced_accuracy": float(peak_ba),
             "peak_epoch": int(peak_epoch),
             "trial_epochs": int(args.trial_epochs),
+            "pruned": bool(was_pruned),
         }
         with (trial_dir / "trial_summary.json").open("w") as f:
             json.dump(summary, f, indent=2, default=float)
+
+        if was_pruned:
+            # Re-raise so Optuna marks this trial state as PRUNED. Note that
+            # Optuna's pruner will still have access to the intermediate
+            # values reported via trial.report() — the surrogate uses them.
+            raise optuna.TrialPruned()
 
         return peak_ba
 
@@ -292,16 +359,18 @@ def main(args: argparse.Namespace) -> int:
         "pruner_n_warmup_steps": int(args.pruner_n_warmup_steps),
         "val_fraction": 0.15,
         "objective": "peak_smoothed_val_balanced_accuracy",
-        "objective_smooth_window": 5,
+        "objective_smooth_window": int(args.objective_smooth_window),
+        "pruning_enabled": True,
     }
     with (out_dir / "search_config.json").open("w") as f:
         json.dump(search_config, f, indent=2)
 
     print(f"[optuna] method={args.method} dataset={args.dataset} "
-          f"tau={args.tau} fold={args.fold}")
+          f"tau={args.tau} fold={args.fold}", flush=True)
     print(f"[optuna] train={len(train_df)} val={len(val_df)} "
-          f"n_trials={args.n_trials} epochs/trial={args.trial_epochs}")
-    print(f"[optuna] output -> {out_dir}")
+          f"n_trials={args.n_trials} epochs/trial={args.trial_epochs} "
+          f"pruning=enabled (warmup={args.pruner_n_warmup_steps} epochs)", flush=True)
+    print(f"[optuna] output -> {out_dir}", flush=True)
 
     # Persistent SQLite storage so we can resume after preemption.
     storage_url = f"sqlite:///{out_dir / 'study.db'}"
@@ -335,11 +404,11 @@ def main(args: argparse.Namespace) -> int:
     )
     elapsed = time.time() - t_start
 
-    print(f"\n[optuna] DONE in {elapsed/3600:.2f} h")
-    print(f"[optuna] best value: {study.best_value:.4f}")
-    print(f"[optuna] best params:")
+    print(f"\n[optuna] DONE in {elapsed/3600:.2f} h", flush=True)
+    print(f"[optuna] best value: {study.best_value:.4f}", flush=True)
+    print(f"[optuna] best params:", flush=True)
     for k, v in study.best_params.items():
-        print(f"          {k}: {v}")
+        print(f"          {k}: {v}", flush=True)
 
     return 0
 
@@ -364,21 +433,27 @@ if __name__ == "__main__":
                    help="Random sampling for the first N trials before TPE engages.")
     p.add_argument("--pruner-n-startup-trials", default=10, type=int,
                    help="Trials before pruning is allowed to fire at all.")
-    p.add_argument("--pruner-n-warmup-steps", default=30, type=int,
+    p.add_argument("--pruner-n-warmup-steps", default=40, type=int,
                    help="Within a trial, epochs before that trial can be pruned.")
+    p.add_argument("--objective-smooth-window", default=5, type=int,
+                   help="Trailing moving-average window for val BA, used for "
+                        "both intermediate-value reports (pruning) and the "
+                        "final objective. Keep these matched.")
     p.add_argument("--resume", action="store_true",
                    help="Resume an existing study (load study from disk if present).")
     sys.exit(main(p.parse_args()))
 
 
 # ---------------------------------------------------------------------------
-# Note on mid-trial pruning: full optuna pruning requires runner.py to call
-# trial.report(intermediate_value, step) and check trial.should_prune() each
-# epoch. The current implementation runs each trial to completion and lets
-# Optuna's TPE sampler bias future trials away from poor regions, which is
-# already a substantial speedup on its own. If you need stronger pruning
-# (i.e. killing already-running trials at epoch 30), modify run_training in
-# src/training/runner.py to accept an optional epoch-end callback and pass
-# trial.report + trial.should_prune through it. The MedianPruner created
-# above will work as soon as the callback is wired.
+# Mid-trial pruning is wired through src/training/runner.py's epoch_callback
+# parameter (added in this patch). The callback computes a trailing-mean of
+# val_balanced_accuracy on each epoch, reports it to Optuna via trial.report,
+# and raises StopTraining (caught by the runner) if Optuna's pruner says so.
+# In the objective wrapper above, StopTraining is converted to optuna.TrialPruned
+# so the Optuna study correctly distinguishes pruned trials from completed/failed.
+#
+# Keep the value of --objective-smooth-window matched to the value used by
+# _peak_val_balanced_accuracy for the final objective — otherwise pruning
+# decisions would be made on a different metric than the trial is ultimately
+# scored on, which gives perverse results.
 # ---------------------------------------------------------------------------
