@@ -159,17 +159,8 @@ class AsyCoDivMixMethod(Method):
         self.K = int(m["K"])
         self.lambda_u = float(m["lambda_u"])
         self.T = float(m["temperature"])
-        # Warmup specification — supports two modes:
-        # (a) Direct: cfg["method"]["warmup_epochs"] = <int>
-        # (b) Legacy: cfg["method"]["warmup_epochs_pct"] + ["warmup_epochs_floor"]
-        # Mode (a) takes precedence if present.
-        self._warmup_epochs_direct = m.get("warmup_epochs")
-        if self._warmup_epochs_direct is None:
-            self.warmup_pct = float(m["warmup_epochs_pct"])
-            self.warmup_floor = int(m["warmup_epochs_floor"])
-        else:
-            self.warmup_pct = None
-            self.warmup_floor = None
+        self.warmup_pct = float(m["warmup_epochs_pct"])
+        self.warmup_floor = int(m["warmup_epochs_floor"])
 
         # MixMatch additions
         self.mixup_alpha = float(m.get("mixup_alpha", 0.75))
@@ -188,14 +179,11 @@ class AsyCoDivMixMethod(Method):
 
     def build(self, total_epochs: int, model_builder) -> None:
         self.total_epochs = int(total_epochs)
-        if self._warmup_epochs_direct is not None:
-            self.warmup_epochs = int(self._warmup_epochs_direct)
-        else:
-            self.warmup_epochs = _compute_warmup_epochs(
-                total_epochs=total_epochs,
-                pct=self.warmup_pct,
-                floor=self.warmup_floor,
-            )
+        self.warmup_epochs = _compute_warmup_epochs(
+            total_epochs=total_epochs,
+            pct=self.warmup_pct,
+            floor=self.warmup_floor,
+        )
         # Two independent models, SAME architecture as asyco.py.
         self.clf_net = model_builder().to(self.device)
         self.ref_net = model_builder().to(self.device)
