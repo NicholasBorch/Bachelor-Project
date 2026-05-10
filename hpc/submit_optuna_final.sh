@@ -25,18 +25,18 @@
 #   ELR ~14h    SCE ~14h    AsyCo ~17h
 # All fit comfortably in 23:59 walltime.
 #
-# Tuning fold: 9 (deterministic from random.Random(10).randint(0, 9))
+# Tuning fold: 5 (deterministic from random.Random(10).randint(0, 9))
 # Training noise: tau=0.2 (noisy training labels)
 # Validation labels: clean (loaded from tau=0.0 fold by image_id matching)
 #
 # Outputs:
-#   results/optuna_final/{method}/imbalanced/adam_resnet34_pretrained/tau_20/fold_09/
-#   logs/optuna_final/optuna_final_{method}_fold9_jN.{out,err}
+#   results/optuna_final/{method}/imbalanced/adam_resnet34_pretrained/tau_20/fold_05/
+#   logs/optuna_final/optuna_final_{method}_fold5_jN.{out,err}
 #
 # After all jobs finish:
-#   python -m scripts.optuna_analyze_final --method elr          --fold 9
-#   python -m scripts.optuna_analyze_final --method sce          --fold 9
-#   python -m scripts.optuna_analyze_final --method asyco_divmix --fold 9
+#   python -m scripts.optuna_analyze_final --method elr          --fold 5
+#   python -m scripts.optuna_analyze_final --method sce          --fold 5
+#   python -m scripts.optuna_analyze_final --method asyco_divmix --fold 5
 
 set -euo pipefail
 
@@ -52,7 +52,7 @@ DATASET=${DATASET:-imbalanced}
 OPTIM=${OPTIM:-adam}
 MODEL=${MODEL:-resnet34_pretrained}
 TAU=${TAU:-0.2}
-FOLD=${FOLD:-9}
+FOLD=${FOLD:-5}
 TRIAL_EPOCHS=${TRIAL_EPOCHS:-150}
 PRUNER_N_WARMUP_STEPS=${PRUNER_N_WARMUP_STEPS:-30}
 PRUNER_N_STARTUP_TRIALS=${PRUNER_N_STARTUP_TRIALS:-10}
