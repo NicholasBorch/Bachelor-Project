@@ -13,6 +13,10 @@ DIFFERENCES vs scripts/stage3_train.py:
   - Always 150 epochs (matches the Optuna trial budget — no Stage 2 lookup).
   - Output tree: results/main_experiment/training/...
   - Idempotent: skips if test_metrics.json exists, unless --force.
+  - Per-epoch training-set NTA / LNMR diagnostics enabled via
+    `--track-train-diagnostics-every` (default 30 = 5 snapshots over 150
+    epochs at epochs 0, 30, 60, 90, 120, plus a final snapshot at epoch
+    149). Pass 0 to disable.
 
 TUNED CONFIG RESOLUTION:
   results/optuna_final/{method}/{dataset}/{optim}_resnet34_{init}/
@@ -28,16 +32,11 @@ Run:
         --method baseline --dataset imbalanced --init pretrained \\
         --optim adam --tau 0.2 --fold 0
 
-    # methods that use tuned configs:
+    # disable per-epoch diagnostics (e.g. for a smoke test):
     python -m scripts.final_experiment_train \\
-        --method elr --dataset imbalanced --init pretrained \\
-        --optim adam --tau 0.2 --fold 0
-
-    # if you've later re-tuned on a different setup:
-    python -m scripts.final_experiment_train \\
-        --method asyco_divmix --dataset imbalanced --init scratch \\
-        --optim sgd --tau 0.3 --fold 7 \\
-        --tuning-fold 5 --tuning-tau 0.2
+        --method baseline --dataset imbalanced --init pretrained \\
+        --optim adam --tau 0.2 --fold 0 \\
+        --track-train-diagnostics-every 0
 """
 from __future__ import annotations
 
@@ -237,11 +236,20 @@ def main(args: argparse.Namespace) -> int:
 
     images_dir = root / cfg["paths"]["images"]
 
+    # Translate --track-train-diagnostics-every: 0 -> None (disabled), else int.
+    # The runner accepts None to mean "do not run per-epoch diagnostics";
+    # the CLI uses 0 instead so it's friendly to env-var passthrough.
+    diag_every = (
+        None if int(args.track_train_diagnostics_every) <= 0
+        else int(args.track_train_diagnostics_every)
+    )
+
     print(
         f"[final_experiment] method={args.method} dataset={args.dataset} "
         f"init={args.init} optim={args.optim} tau={args.tau:.2f} "
         f"fold={args.fold} epochs={EPOCHS} "
-        f"train={len(train_df)} test={len(test_df)}",
+        f"train={len(train_df)} test={len(test_df)} "
+        f"diag_every={diag_every}",
         flush=True,
     )
 
@@ -255,6 +263,7 @@ def main(args: argparse.Namespace) -> int:
         output_dir=out_dir,
         val_df=None,  # main experiment: train + clean test only, no val split
         seed=fold_seed(int(cfg["seed"]), int(args.fold)),
+        track_train_diagnostics_every=diag_every,
     )
 
     # Per-job manifest entry — records what was actually run.
@@ -278,6 +287,7 @@ def main(args: argparse.Namespace) -> int:
             "tuning_fold": int(args.tuning_fold),
             "tuning_tau": float(args.tuning_tau),
             "tuned_config": str(tuned_config_used) if tuned_config_used else None,
+            "track_train_diagnostics_every": diag_every,
         },
         outputs=[
             str(out_dir / "config.yaml"),
@@ -316,6 +326,10 @@ if __name__ == "__main__":
                    help="Which fold the FINAL Optuna search was performed on (default 5)")
     p.add_argument("--tuning-tau", default=0.2, type=float,
                    help="Which tau the FINAL Optuna search was performed at (default 0.2)")
+    p.add_argument("--track-train-diagnostics-every", default=30, type=int,
+                   help="Cadence (in epochs) for per-epoch NTA/LNMR + per-class "
+                        "breakdowns on the training set. 0 disables. Default 30 "
+                        "= 5 snapshots over 150 epochs.")
     p.add_argument("--force", action="store_true",
                    help="overwrite existing test_metrics.json")
     sys.exit(main(p.parse_args()))

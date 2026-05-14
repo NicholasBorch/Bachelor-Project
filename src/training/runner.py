@@ -229,6 +229,83 @@ def _jsonl_append(path: Path, record: dict[str, Any]) -> None:
         f.write(json.dumps(record, default=float) + "\n")
 
 
+def _compute_per_class_noise_diagnostics(
+    y_pred_train: np.ndarray,
+    y_noisy: np.ndarray,
+    y_clean: np.ndarray,
+    num_classes: int,
+) -> dict[str, Any]:
+    """Per-class breakdowns of NTA / LNMR, restricted to FLIPPED samples
+    (those where y_noisy != y_clean).
+
+    Two complementary conditioning views are emitted:
+
+      *_by_clean[c]
+          Among flipped samples whose true (clean) class is c, the
+          fraction for which the model predicted c (NTA) and the
+          fraction for which it predicted the noisy label (LNMR).
+          Answers: "for true class c, how robust is the model to
+          mislabeling away from c?"
+
+      *_by_noisy[c]
+          Among flipped samples whose noisy label is c (i.e., samples
+          mislabeled AS c), the fraction for which the model predicted
+          the true (clean) label (NTA) and the fraction for which it
+          predicted c (LNMR). Answers: "for samples mislabeled as c,
+          how often does the model memorize c?"
+
+    For empty buckets (no flipped samples for the given class under the
+    chosen conditioning), the corresponding entry is None — preserved
+    through json.dumps as null and ignored by downstream aggregation.
+
+    Returns a dict with six keys (4 metric lists + 2 count lists), each
+    of length num_classes.
+    """
+    flipped = y_noisy != y_clean
+    per_class_nta_by_clean: list[float | None] = []
+    per_class_lnmr_by_clean: list[float | None] = []
+    per_class_nta_by_noisy: list[float | None] = []
+    per_class_lnmr_by_noisy: list[float | None] = []
+    n_by_clean: list[int] = []
+    n_by_noisy: list[int] = []
+
+    for c in range(int(num_classes)):
+        # Conditioning on CLEAN class
+        mask_clean = flipped & (y_clean == c)
+        n_clean = int(mask_clean.sum())
+        n_by_clean.append(n_clean)
+        if n_clean > 0:
+            preds_c = y_pred_train[mask_clean]
+            noisy_c = y_noisy[mask_clean]
+            per_class_nta_by_clean.append(float((preds_c == c).mean()))
+            per_class_lnmr_by_clean.append(float((preds_c == noisy_c).mean()))
+        else:
+            per_class_nta_by_clean.append(None)
+            per_class_lnmr_by_clean.append(None)
+
+        # Conditioning on NOISY class
+        mask_noisy = flipped & (y_noisy == c)
+        n_noisy = int(mask_noisy.sum())
+        n_by_noisy.append(n_noisy)
+        if n_noisy > 0:
+            preds_n = y_pred_train[mask_noisy]
+            clean_n = y_clean[mask_noisy]
+            per_class_nta_by_noisy.append(float((preds_n == clean_n).mean()))
+            per_class_lnmr_by_noisy.append(float((preds_n == c).mean()))
+        else:
+            per_class_nta_by_noisy.append(None)
+            per_class_lnmr_by_noisy.append(None)
+
+    return {
+        "per_class_nta_by_clean": per_class_nta_by_clean,
+        "per_class_lnmr_by_clean": per_class_lnmr_by_clean,
+        "per_class_nta_by_noisy": per_class_nta_by_noisy,
+        "per_class_lnmr_by_noisy": per_class_lnmr_by_noisy,
+        "n_flipped_by_clean": n_by_clean,
+        "n_flipped_by_noisy": n_by_noisy,
+    }
+
+
 def run_training(
     cfg: dict,
     train_df: pd.DataFrame,
@@ -240,6 +317,7 @@ def run_training(
     val_df: pd.DataFrame | None = None,
     seed: int | None = None,
     epoch_callback=None,
+    track_train_diagnostics_every: int | None = None,
 ) -> dict[str, Any]:
     """Train one model on one fold end-to-end.
 
@@ -268,6 +346,19 @@ def run_training(
             empty dict is returned (same as Stage 2 mode). Any other
             exception propagates normally. Callbacks see post-write,
             post-validation state — they should not mutate ``record``.
+        track_train_diagnostics_every: optional int cadence (in epochs)
+            for tracking NTA / LNMR on the training set during training.
+            When set to N > 0 and ``dx_clean`` is present on train_df,
+            the model is run over the training set (with test-time
+            transforms) every N epochs, scalar NTA / LNMR plus per-class
+            breakdowns are computed, and the resulting dict is added
+            to that epoch's JSONL record under the key
+            ``train_diagnostics``. A snapshot is always also taken at
+            the final epoch. Each inference pass adds ~1 minute to the
+            epoch on a V100 with 7,470 imbalanced HAM10000 samples;
+            choose N to balance temporal resolution against cost.
+            Default ``None`` disables per-epoch tracking (existing
+            callers see unchanged behavior).
 
     Returns:
         The final test metrics dict (with NTA/LNMR merged in when
@@ -337,6 +428,27 @@ def run_training(
         log_path.unlink()
 
     stopped_early = False
+
+    # Set up cached clean / noisy label arrays for per-epoch diagnostics.
+    # Only meaningful when `dx_clean` is present and the user opted in via
+    # ``track_train_diagnostics_every``. The labels are computed once here
+    # and reused per snapshot to avoid repeated DataFrame -> ndarray work.
+    _diag_enabled = (
+        track_train_diagnostics_every is not None
+        and int(track_train_diagnostics_every) > 0
+        and "dx_clean" in train_df.columns
+    )
+    if _diag_enabled:
+        _diag_every = int(track_train_diagnostics_every)
+        _diag_y_clean = _labels_to_indices(train_df["dx_clean"])
+        _diag_y_noisy = _labels_to_indices(train_df["dx"])
+        _diag_num_classes = int(cfg.get("num_classes", NUM_CLASSES))
+    else:
+        _diag_every = 0
+        _diag_y_clean = None
+        _diag_y_noisy = None
+        _diag_num_classes = 0
+
     for epoch in range(int(total_epochs)):
         t0 = time.time()
         loss_sum = 0.0
@@ -375,6 +487,29 @@ def run_training(
             record["val_macro_f1"] = float(val_metrics["macro_f1"])
             record["val_weighted_f1"] = float(val_metrics["weighted_f1"])
             record["val_macro_auc"] = float(val_metrics["macro_auc"])
+
+        # Per-epoch training-set noise-label diagnostics. Triggered every
+        # `_diag_every` epochs and always on the final epoch. Adds a
+        # `train_diagnostics` sub-dict to the record carrying scalar
+        # NTA / LNMR plus per-class breakdowns.
+        is_last_epoch = (epoch == int(total_epochs) - 1)
+        if _diag_enabled and (epoch % _diag_every == 0 or is_last_epoch):
+            _diag_y_pred = _predict_on_train_set(
+                method=method, train_df=train_df, images_dir=images_dir,
+                cfg=cfg, device=device,
+            )
+            _diag_scalar = compute_noise_label_interaction(
+                y_pred_train=_diag_y_pred,
+                y_noisy=_diag_y_noisy,
+                y_clean=_diag_y_clean,
+            )
+            _diag_per_class = _compute_per_class_noise_diagnostics(
+                y_pred_train=_diag_y_pred,
+                y_noisy=_diag_y_noisy,
+                y_clean=_diag_y_clean,
+                num_classes=_diag_num_classes,
+            )
+            record["train_diagnostics"] = {**_diag_scalar, **_diag_per_class}
 
         _jsonl_append(log_path, record)
 
@@ -415,6 +550,14 @@ def run_training(
             y_pred_train=y_pred_train, y_noisy=y_noisy, y_clean=y_clean,
         )
         test_metrics.update(noise_metrics)
+        # Per-class breakdowns alongside the scalars. These are stored
+        # under the same flat keys as the scalars to keep the JSON shape
+        # uniform with the per-epoch `train_diagnostics` sub-dict.
+        per_class_metrics = _compute_per_class_noise_diagnostics(
+            y_pred_train=y_pred_train, y_noisy=y_noisy, y_clean=y_clean,
+            num_classes=int(cfg.get("num_classes", NUM_CLASSES)),
+        )
+        test_metrics.update(per_class_metrics)
     else:
         test_metrics.update({
             "nta": None,

@@ -15,6 +15,7 @@
 #   FOLDS="0 1 2 3 4 5 6 7 8 9"
 #   TUNING_FOLD=5                    # which fold the Optuna search ran on
 #   TUNING_TAU=0.2                   # which tau the Optuna search trained on
+#   TRACK_DIAG_EVERY=30              # per-epoch NTA/LNMR cadence (0 disables)
 #
 # Examples:
 #   bash hpc/submit_final_experiment.sh
@@ -24,6 +25,9 @@
 #
 #   # Only AsyCo, only the first 3 folds (smoke test):
 #   METHODS=asyco_divmix FOLDS="0 1 2" bash hpc/submit_final_experiment.sh
+#
+#   # Disable per-epoch diagnostics for speed:
+#   TRACK_DIAG_EVERY=0 bash hpc/submit_final_experiment.sh
 #
 # SUBMISSION ORDER (matches user spec):
 #   For each method in order [baseline sce elr asyco_divmix]:
@@ -38,6 +42,10 @@
 #   sce            2:30   (expected ~30 min/job)
 #   elr            3:00   (expected ~35 min/job)
 #   asyco_divmix   5:00   (expected ~60 min/job)
+#
+# Per-epoch diagnostics adds ~1 min per snapshot. At TRACK_DIAG_EVERY=30 over
+# 150 epochs that's 5 snapshots = ~5 min extra per job. Walltimes above
+# include enough headroom for this.
 #
 # Idempotent: jobs whose test_metrics.json already exists are skipped by the
 # Python entry point.
@@ -60,6 +68,7 @@ TAUS=${TAUS:-"0.0 0.1 0.2 0.3 0.4 0.5"}
 FOLDS=${FOLDS:-"0 1 2 3 4 5 6 7 8 9"}
 TUNING_FOLD=${TUNING_FOLD:-5}
 TUNING_TAU=${TUNING_TAU:-0.2}
+TRACK_DIAG_EVERY=${TRACK_DIAG_EVERY:-30}
 
 mkdir -p "${LOG_DIR}"
 
@@ -113,20 +122,22 @@ submit_one_job() {
             --tau ${tau} \
             --fold ${fold} \
             --tuning-fold ${TUNING_FOLD} \
-            --tuning-tau ${TUNING_TAU}" \
+            --tuning-tau ${TUNING_TAU} \
+            --track-train-diagnostics-every ${TRACK_DIAG_EVERY}" \
         > /dev/null
 }
 
 
 echo "=== Submitting Main Experiment ==="
-echo "Dataset:       ${DATASET}"
-echo "Init:          ${INIT}"
-echo "Optim:         ${OPTIM}"
-echo "Methods:       ${METHODS}"
-echo "Taus:          ${TAUS}"
-echo "Folds:         ${FOLDS}"
-echo "Tuning fold:   ${TUNING_FOLD} (from FINAL Optuna search)"
-echo "Tuning tau:    ${TUNING_TAU}"
+echo "Dataset:            ${DATASET}"
+echo "Init:               ${INIT}"
+echo "Optim:              ${OPTIM}"
+echo "Methods:            ${METHODS}"
+echo "Taus:               ${TAUS}"
+echo "Folds:              ${FOLDS}"
+echo "Tuning fold:        ${TUNING_FOLD} (from FINAL Optuna search)"
+echo "Tuning tau:         ${TUNING_TAU}"
+echo "Train-diag cadence: every ${TRACK_DIAG_EVERY} epochs (0 = disabled)"
 echo
 
 total_submitted=0
@@ -156,3 +167,4 @@ echo "  python -m scripts.final_experiment_status"
 echo
 echo "Analyze (after all jobs complete):"
 echo "  python -m scripts.final_experiment_analyze"
+echo "  python -m scripts.final_experiment_plot_train_diagnostics"
