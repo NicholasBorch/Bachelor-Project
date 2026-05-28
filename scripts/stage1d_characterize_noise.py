@@ -277,9 +277,9 @@ def _plot_concentration_report(
         flier.set_markeredgecolor("none")
 
     # Uniform baseline
-    uniform = 1.0 / n_classes
+    uniform = 1.0 / (n_classes - 1)
     ax.axhline(uniform, color=_BASE_C, linestyle="--", linewidth=1.3,
-               label=f"Uniform baseline (1/{n_classes})", zorder=2)
+               label=f"Uniform baseline (1/{n_classes - 1})", zorder=2)
 
     ax.set_xticks(range(n_tau))
     ax.set_xticklabels(labels)
