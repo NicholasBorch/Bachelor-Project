@@ -182,15 +182,21 @@ def _plot_mae_vs_tau(summary: pd.DataFrame, out_path: Path, dataset: str) -> Non
         lo = sub["ci_lo"].values
         hi = sub["ci_hi"].values
         color = _NOISE_COLORS[noise_type]
-        ax.plot(taus, means, marker="o", linewidth=1.9,
+        ax.plot(taus, means, marker="o", markersize=5, linewidth=2.0,
                 label=_NOISE_LABELS[noise_type], color=color)
-        ax.fill_between(taus, lo, hi, color=color, alpha=0.18, linewidth=0)
+        ax.fill_between(taus, lo, hi, color=color, alpha=0.15, linewidth=0)
     ax.set_xlabel(r"Noise rate $\tau$")
     ax.set_ylabel("Off-diagonal MAE vs. human reference\n(flip-only, lower = closer)")
-    ax.set_title(f"Alignment with human confusion patterns — {dataset}")
-    ax.grid(True, linestyle=":", alpha=0.5)
-    ax.legend(loc="best")
+    ax.set_title(f"Alignment with human confusion patterns — {dataset}", fontsize=12)
+    # Clean look: drop the box, keep only a light horizontal grid, no tick marks.
+    ax.grid(True, axis="y", linestyle="-", linewidth=0.6, alpha=0.25)
+    ax.set_axisbelow(True)
+    for spine in ("top", "right", "left"):
+        ax.spines[spine].set_visible(False)
+    ax.spines["bottom"].set_color("#cccccc")
+    ax.tick_params(length=0)
     ax.set_xticks(taus)
+    ax.legend(loc="best", frameon=False)
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
@@ -204,29 +210,45 @@ def _plot_confusion_triplet(
     out_path: Path,
     dataset: str,
 ) -> None:
-    fig, axes = plt.subplots(1, 3, figsize=(16, 4.8))
+    # 3 equal panels + a slim 4th column reserved for the shared colorbar,
+    # so the rightmost heatmap is the same width as the other two.
+    fig = plt.figure(figsize=(20, 6))
+    gs = fig.add_gridspec(
+        1, 4, width_ratios=[1, 1, 1, 0.05], wspace=0.15,
+    )
+    axes = [fig.add_subplot(gs[0, i]) for i in range(3)]
+    cax = fig.add_subplot(gs[0, 3])  # dedicated colorbar axis
+
     mats = [human, norm, feat]
     titles = [
         "Human (all readers)",
         f"Normalized IDN ($\\tau={tau:.2f}$)",
         f"Feature-Driven IDN ($\\tau={tau:.2f}$)",
     ]
-    for ax, M, title in zip(axes, mats, titles):
+    for i, (ax, M, title) in enumerate(zip(axes, mats, titles)):
+        last = i == len(axes) - 1
         sns.heatmap(
             M, annot=True, fmt=".2f", cmap="OrRd",
             xticklabels=CLASS_NAMES, yticklabels=CLASS_NAMES,
-            vmin=0, vmax=1, ax=ax, cbar=True, square=True,
-            annot_kws={"size": 7},
+            vmin=0, vmax=1, ax=ax, square=True,
+            cbar=last,                       # draw the colorbar once...
+            cbar_ax=cax if last else None,   # ...into the dedicated axis
+            cbar_kws={"label": "Flip probability"} if last else None,
+            linewidths=0.5, linecolor="white",
+            annot_kws={"size": 9, "color": "#333333"},
         )
-        ax.set_xlabel("Flipped-to class")
-        ax.set_ylabel("True class")
+        ax.set_xlabel("Flipped-to class", fontsize=9)
+        ax.set_ylabel("True class" if i == 0 else "", fontsize=9)
         ax.set_title(title, fontsize=11)
+        ax.tick_params(length=0)
+        ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=8)
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right", fontsize=8)
     fig.suptitle(
         f"Flip-only confusion structure — {dataset} "
         f"(diagonal removed, rows renormalized)",
         fontsize=12,
     )
-    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    fig.subplots_adjust(left=0.05, right=0.94, top=0.90, bottom=0.12)
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
 
