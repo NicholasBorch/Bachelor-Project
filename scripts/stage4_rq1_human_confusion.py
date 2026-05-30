@@ -190,6 +190,7 @@ def _plot_mae_vs_tau(summary: pd.DataFrame, out_path: Path, dataset: str) -> Non
     ax.set_title(f"Alignment with human confusion patterns — {dataset}")
     ax.grid(True, linestyle=":", alpha=0.5)
     ax.legend(loc="best")
+    ax.set_xticks(taus)
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
