@@ -1,9 +1,0 @@
-name: balanced
-metadata_file: metadata_balanced.csv
-num_samples: 511
-batch_size: 32
-sampler: shuffle
-class_weighted_loss: false
-# OOF training protocol is fixed (Adam, lr=1e-4, 30 epochs) and hardcoded
-# in scripts/stage1b_collect_oof_probs.py. See PROJECT_DOCUMENTATION §6
-# Stage 1b and §9 for rationale.
