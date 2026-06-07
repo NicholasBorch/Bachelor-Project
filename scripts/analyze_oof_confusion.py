@@ -238,13 +238,13 @@ def confusability_summary(
 
 
 # ===========================================================================
-# heatmap (Greens, matching the confusion-matrix style used in Part 5)
+# heatmap (Purples, matching the confusion-matrix style used in Part 5)
 # ===========================================================================
 def _heatmap(M: np.ndarray, classes: list[str], title: str, out_png: Path,
              diag_is_blank: bool = False) -> None:
     plt.rcParams.update(_PLT_STYLE)
     fig, ax = plt.subplots(figsize=(6.0, 5.2))
-    im = ax.imshow(M, cmap="Greens", vmin=0.0, vmax=1.0, aspect="auto")
+    im = ax.imshow(M, cmap="Purples", vmin=0.0, vmax=1.0, aspect="auto")
     ax.set_xticks(range(len(classes))); ax.set_xticklabels(classes, rotation=45, ha="right")
     ax.set_yticks(range(len(classes))); ax.set_yticklabels(classes)
     ax.set_xlabel("Predicted / target class"); ax.set_ylabel("True class")
