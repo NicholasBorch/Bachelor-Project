@@ -359,6 +359,11 @@ def _class_order(df: pd.DataFrame) -> list[str]:
 
 def _style():
     plt.rcParams.update({
+        "font.family":        "serif",
+        "font.serif":         ["Palatino", "Palatino Linotype", "Book Antiqua", "DejaVu Serif"],
+        "mathtext.fontset":   "cm",      # serif math, e.g. $\tau$, matches body text
+        "axes.unicode_minus": False,
+        "figure.dpi":         150,
         "savefig.dpi": CFG.DPI,
         "font.size": 10,
         "axes.titlesize": 11,
@@ -455,7 +460,7 @@ def plot(df: pd.DataFrame):
     ]
     fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False,
                bbox_to_anchor=(0.5, -0.04))
-    fig.suptitle("Composition of observed (noisy) labels per class", y=1.0,
+    fig.suptitle("Composition of observed (noisy) labels per class - Training set only", y=1.0,
                  fontsize=12.5)
     fig.tight_layout(rect=[0, 0.03, 1, 0.97])
 

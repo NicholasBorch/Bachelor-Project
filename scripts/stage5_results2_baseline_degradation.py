@@ -10,14 +10,14 @@ thesis. Only the BASELINE method is analyzed here; the noise-robust methods and
 the other three protocols are handled in Results.3-5.
 
 What it produces:
-    1. A twin-panel figure (left: balanced accuracy, right: macro F1) of the
-       baseline vs. tau, each panel with 95% bootstrap CI bands across the ten
-       folds and significance markers above each tau > 0 (paired Wilcoxon vs.
-       the clean tau = 0 condition, Holm-corrected across the five noise rates).
+    1. A single line figure of the baseline's three metrics (balanced accuracy,
+       macro F1, macro AUC) vs. tau, each with a 95% bootstrap CI band across
+       the ten folds and significance markers above each tau > 0 (paired
+       Wilcoxon vs. the clean tau = 0 condition, Holm-corrected across the five
+       noise rates).
     2. A body table (BA and macro F1 per tau, mean +/- CI, Holm-corrected
        p-value vs. clean).
     3. An appendix table of the full per-fold scores (reproducibility).
-    4. An appendix macro-AUC-vs-tau figure (supporting metric, same treatment).
 
 The statistical test reuses src.analysis.stats.wilcoxon_vs_clean (the per-method
 tau-vs-clean noise-sensitivity test defined for the thesis). That function
@@ -33,8 +33,7 @@ Outputs (new folder):
     results/results2_baseline_degradation/{dataset}/{init}_{optim}/
         baseline_metrics_per_fold.csv     # tidy: tau, fold, balanced_accuracy, macro_f1, macro_auc
         baseline_summary.csv              # tau, metric, mean, ci_lo, ci_hi, p_holm, sig
-        baseline_degradation.png          # twin panel BA | macro F1
-        baseline_macro_auc.png            # appendix supporting figure
+        baseline_degradation.png          # line plot: all 3 metrics vs tau
         manifest .json (via write_manifest)
 """
 from __future__ import annotations
@@ -51,7 +50,21 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+# Thesis figure formatting convention: matplotlib's native serif (Palatino)
+# renderer, no LaTeX (keeps it HPC-safe). Falls back to DejaVu Serif if
+# Palatino isn't installed. Math symbols ($\tau$) use serif mathtext.
+plt.rcParams.update({
+    "font.family":        "serif",
+    "font.serif":         ["Palatino", "Palatino Linotype", "Book Antiqua", "DejaVu Serif"],
+    "mathtext.fontset":   "cm",      # serif math, e.g. $\tau$, matches body text
+    "axes.unicode_minus": False,
+    "figure.dpi":         150,
+    "savefig.dpi":        300,
+    "savefig.bbox":       "tight",
+})
+
 from src.analysis.stats import bootstrap_ci, wilcoxon_vs_clean
+import scripts.thesis_paired_stats as TPS
 from src.utils.io import ensure_dir, load_config, project_root
 from src.utils.manifest import write_manifest
 
@@ -70,7 +83,7 @@ _METRIC_LABELS = {
 # Shared 4-method color palette, reused across Results.2-5 so each method has
 # the SAME color in every figure. Colorblind-safe, qualitatively distinct.
 _METHOD_COLORS = {
-    "baseline":     "#9fb6cd",  # greyish light blue (the reference)
+    "baseline":     "#9ec9e2",  # light blue, matched to Results.3 palette
     "sce":          "#1b9e77",  # teal-green
     "elr":          "#d95f02",  # orange
     "asyco_divmix": "#7570b3",  # violet
@@ -81,6 +94,20 @@ _METHOD_LABELS = {
     "elr":          "ELR",
     "asyco_divmix": "AsyCo",
 }
+
+# Display labels for the protocol shown in figure titles. The underlying
+# protocol string ("{init}_{optim}", e.g. "pretrained_adam") is kept unchanged
+# for paths, CSV columns, and the manifest; only the title uses these.
+_PROTOCOL_LABELS = {
+    "pretrained_adam": "Protocol AP",
+    "pretrained_sgd":  "Protocol SP",
+    "scratch_adam":    "Protocol AS",
+    "scratch_sgd":     "Protocol SS",
+}
+
+
+def _protocol_label(protocol: str) -> str:
+    return _PROTOCOL_LABELS.get(protocol, protocol)
 
 
 def _tau_dirname(tau: float) -> str:
@@ -105,9 +132,12 @@ def _metrics_path(
             {method}/{dataset}/{init}_{optim}/tau_NN/fold_NN/test_metrics.json
     """
     protocol = f"{init}_{optim}"
+    # Real tree: results/main_experiment/{protocol}/training/{method}/
+    #     tau_NN/fold_NN/test_metrics.json  (no {dataset} level; protocol once).
+    # `dataset` kept in the signature for call-site compatibility only.
     return (
         root / "results" / "main_experiment" / protocol / "training"
-        / method / dataset / protocol
+        / method
         / _tau_dirname(tau) / _fold_dirname(fold) / "test_metrics.json"
     )
 
@@ -121,9 +151,10 @@ def _protocol_root(root: Path, method: str, dataset: str, init: str, optim: str)
         results/main_experiment/{init}_{optim}/training/{method}/{dataset}/{init}_{optim}/
     """
     protocol = f"{init}_{optim}"
+    # Real tree: results/main_experiment/{protocol}/training/{method}/
     return (
         root / "results" / "main_experiment" / protocol / "training"
-        / method / dataset / protocol
+        / method
     )
 
 
@@ -248,15 +279,31 @@ def _build_summary(
     all_metrics = list(_PRIMARY_METRICS) + [_SUPPORTING_METRIC]
     summary_rows: list[dict] = []
 
-    # Wilcoxon vs clean (raw p) -> Holm, per metric.
+    # vs-clean test via the shared thesis statistics module: each tau>0 vs the
+    # clean (tau=0) condition by fold, with exact Wilcoxon + exact permutation +
+    # bootstrap CI on the paired difference + rank-biserial r, directional Holm,
+    # and a concordance flag. diff = noisy - clean, so degradation has
+    # direction = -1 and prints "-*", "-**", ... (significantly WORSE than clean).
     holm_lookup: dict[tuple[str, float], tuple[float, str]] = {}
+    extra_lookup: dict[tuple[str, float], dict] = {}
+    taus_nz = [t for t in taus if not np.isclose(t, 0.0)]
     for metric in all_metrics:
-        vc = wilcoxon_vs_clean(long_df, metric=metric)  # raw p_value per tau
-        vc = vc.sort_values("tau").reset_index(drop=True)
-        raw_p = vc["p_value"].tolist()
-        holm_p = _holm(raw_p)
-        for (_, r), hp in zip(vc.iterrows(), holm_p):
-            holm_lookup[(metric, float(r["tau"]))] = (hp, _sig_code(hp))
+        clean = (long_df[np.isclose(long_df["tau"], 0.0)]
+                 .set_index("fold")[metric])
+        block = []
+        for tau in taus_nz:
+            noisy = (long_df[np.isclose(long_df["tau"], tau)]
+                     .set_index("fold")[metric])
+            paired = pd.concat([clean.rename("clean"),
+                                noisy.rename("noisy")], axis=1).dropna()
+            d = paired["noisy"].to_numpy() - paired["clean"].to_numpy()
+            res = TPS.paired_compare(d, n_boot=n_bootstrap, boot_seed=boot_seed)
+            block.append(dict(metric=metric, tau=float(tau), **res.as_dict()))
+        TPS.add_holm_and_flags(block)
+        for rec in block:
+            key = (metric, rec["tau"])
+            holm_lookup[key] = (rec["p_wilcoxon_holm"], rec["sig"])
+            extra_lookup[key] = rec
 
     for metric in all_metrics:
         for tau in taus:
@@ -269,6 +316,7 @@ def _build_summary(
             hp, sig = ("nan", "---") if is_clean else holm_lookup.get(
                 (metric, float(tau)), (float("nan"), "n.s.")
             )
+            ex = extra_lookup.get((metric, float(tau)), {})
             summary_rows.append({
                 "metric": metric, "tau": float(tau),
                 "mean": float(vals.mean()),
@@ -276,90 +324,103 @@ def _build_summary(
                 "ci_lo": lo, "ci_hi": hi, "n_folds": int(vals.size),
                 "p_holm_vs_clean": hp,
                 "sig_vs_clean": sig,
+                "delta_vs_clean": ex.get("delta", float("nan")),
+                "delta_ci_lo": ex.get("delta_ci_lo", float("nan")),
+                "delta_ci_hi": ex.get("delta_ci_hi", float("nan")),
+                "r_rb": ex.get("r_rb", float("nan")),
+                "p_perm_vs_clean": ex.get("p_perm", float("nan")),
+                "p_perm_holm_vs_clean": ex.get("p_perm_holm", float("nan")),
+                "concordant": ex.get("concordant", True),
             })
     return pd.DataFrame(summary_rows)
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# Plots (bar charts)
+# Plot: line plot of all three metrics degrading under increasing noise
 # ──────────────────────────────────────────────────────────────────────────
-def _asymmetric_err(sub: pd.DataFrame) -> np.ndarray:
-    """CI bounds -> matplotlib yerr (distances from the mean): shape (2, n)."""
-    mean = sub["mean"].to_numpy()
-    lo = sub["ci_lo"].to_numpy()
-    hi = sub["ci_hi"].to_numpy()
-    lower = np.clip(mean - lo, 0, None)
-    upper = np.clip(hi - mean, 0, None)
-    return np.vstack([lower, upper])
+# Per-metric line colours. Colourblind-safe, qualitatively distinct (Okabe-Ito).
+_METRIC_LINE_COLORS = {
+    "balanced_accuracy": "#0072B2",  # blue
+    "macro_f1":          "#D55E00",  # vermillion
+    "macro_auc":         "#009E73",  # green
+}
+_METRIC_MARKERS = {
+    "balanced_accuracy": "o",
+    "macro_f1":          "s",
+    "macro_auc":         "^",
+}
 
 
-def _bar_panel(ax, sub: pd.DataFrame, color: str, ylabel: str) -> None:
-    """One bar chart: baseline mean per tau, asymmetric CI error bars,
-    significance codes above each tau > 0 bar."""
+def _metric_curve(ax, sub: pd.DataFrame, metric: str) -> None:
+    """Plot one metric's mean-vs-tau line with a shaded bootstrap CI band and
+    significance codes above each tau > 0 point."""
     sub = sub.sort_values("tau")
     taus = sub["tau"].to_numpy()
     means = sub["mean"].to_numpy()
-    yerr = _asymmetric_err(sub)
-    x = np.arange(len(taus))
-    ax.bar(
-        x, means, width=0.66, color=color, edgecolor="none",
-        yerr=yerr, capsize=0,
-        error_kw={"elinewidth": 1.0, "ecolor": "#5a5a5a", "alpha": 0.8},
+    lo = sub["ci_lo"].to_numpy()
+    hi = sub["ci_hi"].to_numpy()
+    color = _METRIC_LINE_COLORS[metric]
+
+    ax.fill_between(taus, lo, hi, color=color, alpha=0.15, linewidth=0, zorder=2)
+    ax.plot(
+        taus, means, color=color, marker=_METRIC_MARKERS[metric],
+        markersize=5.5, linewidth=1.8, label=_METRIC_LABELS[metric], zorder=3,
     )
-    # Significance codes above the error-bar top for tau > 0.
-    for xi, (_, r) in zip(x, sub.iterrows()):
+    # Significance codes above the CI band for tau > 0.
+    for _, r in sub.iterrows():
         if np.isclose(r["tau"], 0.0):
             continue
         code = r["sig_vs_clean"]
         if code in ("", "---"):
             continue
-        ax.annotate(code, xy=(xi, r["ci_hi"]), xytext=(0, 6),
+        ax.annotate(code, xy=(r["tau"], r["ci_hi"]), xytext=(0, 5),
                     textcoords="offset points", ha="center", va="bottom",
-                    fontsize=10, color="#555555")
-    ax.set_xticks(x)
-    ax.set_xticklabels([f"{t:.1f}" for t in taus])
-    ax.set_xlabel(r"Noise rate $\tau$")
-    ax.set_ylabel(ylabel)
-    ax.set_title(ylabel, fontsize=12)
-    # Clean look: drop the box, keep only a light horizontal grid.
-    ax.grid(True, axis="y", linestyle="-", linewidth=0.6, alpha=0.25)
-    ax.set_axisbelow(True)
-    for spine in ("top", "right", "left"):
-        ax.spines[spine].set_visible(False)
-    ax.spines["bottom"].set_color("#cccccc")
-    ax.tick_params(length=0)  # no tick marks, just labels
-    # Headroom so significance codes are not clipped.
-    ymax = float((sub["ci_hi"]).max())
-    ax.set_ylim(0, min(1.0, ymax * 1.12))
+                    fontsize=9, color=color)
 
 
-def _plot_twin_panel(
+def _plot_degradation(
     summary: pd.DataFrame, taus: list[float], out_path: Path, protocol: str
 ) -> None:
-    color = _METHOD_COLORS[_BASELINE]
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4.8))
-    for metric, ax in (("balanced_accuracy", axes[0]), ("macro_f1", axes[1])):
+    """Single figure: all three metrics' mean (with bootstrap CI bands) vs tau."""
+    metrics = list(_PRIMARY_METRICS) + [_SUPPORTING_METRIC]
+    # Only the tau values actually present in the summary, in order.
+    taus_present = sorted(float(t) for t in summary["tau"].unique())
+
+    fig, ax = plt.subplots(figsize=(7.5, 3.6))
+    for metric in metrics:
         sub = summary[summary["metric"] == metric]
         if sub.empty:
             continue
-        _bar_panel(ax, sub, color, _METRIC_LABELS[metric])
-    fig.suptitle(f"Baseline degradation under label noise — {protocol}", fontsize=13)
-    fig.tight_layout(rect=(0, 0, 1, 0.95))
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
+        _metric_curve(ax, sub, metric)
 
+    ax.set_xlabel(r"Noise rate $\tau$")
+    ax.set_ylabel("Score")
+    ax.set_title(f"Baseline degradation under label noise — {_protocol_label(protocol)}", fontsize=12)
 
-def _plot_supporting(
-    summary: pd.DataFrame, taus: list[float], out_path: Path, protocol: str
-) -> None:
-    sub = summary[summary["metric"] == _SUPPORTING_METRIC]
-    if sub.empty:
-        return
-    fig, ax = plt.subplots(figsize=(7.0, 4.6))
-    _bar_panel(ax, sub, _METHOD_COLORS[_BASELINE], _METRIC_LABELS[_SUPPORTING_METRIC])
-    ax.set_title(f"Baseline macro AUC under label noise — {protocol}")
+    # X-axis ticks only at tau values we actually have data for (no in-between).
+    ax.set_xticks(taus_present)
+    ax.set_xticklabels([f"{t:.1f}" for t in taus_present])
+    # Pin the left (y) axis at tau = 0 rather than leaving padding to its left.
+    ax.set_xlim(0.0, max(taus_present) + 0.02)
+    ax.spines["left"].set_position(("data", 0.0))
+
+    # Y-axis ticks at fixed 0.1 intervals from 0.1 to 1.0, but the axis bottom
+    # stays at 0 so nothing is clipped.
+    ax.set_yticks(np.arange(0.1, 1.0 + 1e-9, 0.1))
+    ax.set_ylim(0.0, 1.0)
+
+    # Clean look: drop top/right spines, keep bottom + left (x/y axes), light grid.
+    ax.grid(True, linestyle="-", linewidth=0.6, alpha=0.25)
+    ax.set_axisbelow(True)
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+    for spine in ("bottom", "left"):
+        ax.spines[spine].set_color("#cccccc")
+    ax.tick_params(length=0)
+
+    ax.legend(frameon=False, loc="lower left")
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path)
     plt.close(fig)
 
 
@@ -388,10 +449,8 @@ def _run(
     summary.insert(1, "protocol", protocol)
     summary.to_csv(out_dir / "baseline_summary.csv", index=False)
 
-    twin_path = out_dir / "baseline_degradation.png"
-    _plot_twin_panel(summary, taus, twin_path, protocol)
-    auc_path = out_dir / "baseline_macro_auc.png"
-    _plot_supporting(summary, taus, auc_path, protocol)
+    fig_path = out_dir / "baseline_degradation.png"
+    _plot_degradation(summary, taus, fig_path, protocol)
 
     # Console summary: where does degradation become significant?
     print(f"\n[results2] === {dataset} / {protocol}: baseline vs. clean (Holm) ===")
@@ -415,7 +474,7 @@ def _run(
         "outputs": [
             str((out_dir / f).relative_to(root))
             for f in ("baseline_metrics_per_fold.csv", "baseline_summary.csv",
-                      twin_path.name, auc_path.name)
+                      fig_path.name)
         ],
     }
 
@@ -444,7 +503,7 @@ def main(args: argparse.Namespace) -> int:
             "init": args.init, "optim": args.optim,
             "primary_metrics": list(_PRIMARY_METRICS),
             "supporting_metric": _SUPPORTING_METRIC,
-            "test": "paired_wilcoxon_vs_clean_per_tau_holm",
+            "test": "paired_wilcoxon+permutation+bootstrapCI_vs_clean_per_tau_holm",
             "n_bootstrap": int(args.n_bootstrap),
         },
         outputs=all_outputs,
@@ -465,8 +524,8 @@ if __name__ == "__main__":
     p.add_argument("--optim", default="adam",
                    help="Optimizer of the primary protocol (default: adam). "
                         "Together with --init this selects AP by default.")
-    p.add_argument("--n-bootstrap", type=int, default=2000,
-                   help="Bootstrap resamples for the CI (default 2000, matches thesis).")
-    p.add_argument("--bootstrap-seed", type=int, default=0,
-                   help="Seed for the bootstrap RNG (default 0).")
+    p.add_argument("--n-bootstrap", type=int, default=10000,
+                   help="Bootstrap resamples for the CI (default 10000, matches thesis).")
+    p.add_argument("--bootstrap-seed", type=int, default=10,
+                   help="Seed for the bootstrap RNG (default 10).")
     sys.exit(main(p.parse_args()))
