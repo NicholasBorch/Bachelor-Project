@@ -1,4 +1,4 @@
-# Noise-Robust Skin-Lesion Classification under Instance-Dependent Label Noise
+# Comparing Noise-Robust Training Strategies for Dermatoscopic Image Classification under Instance-Dependent Label Noise
 
 Code for a DTU Bachelor Thesis, as part of the BSc in Artificial Intelligence and Data, benchmarking noise-robust training methods on
 dermatoscopic images. Three noise-robust strategies — **SCE** (robust loss), **ELR**
