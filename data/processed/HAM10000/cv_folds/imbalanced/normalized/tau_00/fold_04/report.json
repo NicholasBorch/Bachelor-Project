@@ -1,0 +1,15 @@
+{
+  "tau_requested": 0.0,
+  "empirical_rate": 0.0,
+  "n_total": 6723,
+  "n_flipped": 0,
+  "per_class_flip_rate": {
+    "akiec": 0.0,
+    "bcc": 0.0,
+    "bkl": 0.0,
+    "df": 0.0,
+    "mel": 0.0,
+    "nv": 0.0,
+    "vasc": 0.0
+  }
+}

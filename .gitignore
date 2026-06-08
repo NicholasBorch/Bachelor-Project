@@ -1,5 +1,7 @@
-data/processed/
-data/raw/
+data/raw/HAM10000_images_part_1/
+data/raw/HAM10000_images_part_2/
+
+data/processed/HAM10000/one_image_per_lesion/images/
 
 # Python
 __pycache__/
