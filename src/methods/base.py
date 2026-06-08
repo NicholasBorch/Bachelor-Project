@@ -1,32 +1,15 @@
-"""Abstract Method base class.
+"""
+Abstract Method base class.
 
-Every training strategy (Baseline, SCE, ELR, AsyCo, AsyCo+DivMix) is a
-subclass. The contract is intentionally narrow:
+Every training strategy (Baseline, SCE, ELR, AsyCo+DivMix) subclasses this.
+Contract: build(total_epochs, model_builder); per epoch, train_step(batch, epoch,
+scaler) -> MethodOutput then scheduler_step(); predict(loader) -> (y_true, y_pred,
+y_prob). Methods owning multiple networks step them all inside train_step, and a
+shared GradScaler keeps mixed precision uniform.
 
-    method.build(total_epochs)          # attach optimizers/schedulers
-    for epoch in range(total_epochs):
-        for batch in loader:
-            out = method.train_step(batch, epoch, scaler)   # returns MethodOutput
-        method.scheduler_step()
-
-    preds = method.predict(test_loader)     # returns (y_true, y_pred, y_prob)
-
-Methods with multiple networks (AsyCo, AsyCo+DivMix) own multiple optimizers
-and step them all internally inside `train_step`. The external runner doesn't
-know or care.
-
-A shared GradScaler is passed into train_step so that mixed precision is
-uniform across methods.
-
-Two-view batching
------------------
-Most methods operate on (image, label, idx) batches from ``HamDataset``.
-AsyCo+DivMix needs MixMatch-style two-augmentation batches; subclasses opt
-in by setting the class attribute ``requires_two_views = True``. The
-runner inspects this flag and wraps the train dataset in
-``TwoViewHamDataset`` when set, producing (img1, img2, label, idx) batches.
-The flag has NO effect on validation/test loaders — all methods evaluate
-on standard single-view test data via ``predict()``.
+Subclasses needing MixMatch-style two-view batches set requires_two_views = True;
+the runner then wraps the train dataset in TwoViewHamDataset. Validation/test
+always use single-view data.
 """
 from __future__ import annotations
 
@@ -41,13 +24,7 @@ import torch.nn.functional as F
 
 @dataclass
 class MethodOutput:
-    """Per-batch training output returned by Method.train_step.
-
-    Attributes:
-        loss_total: scalar float for logging.
-        loss_components: dict of named sub-losses for logging (e.g. CE, RCE).
-        batch_size: number of samples in the batch (after any filtering).
-    """
+    """Per-batch training output: loss_total, loss_components (named sub-losses), batch_size."""
     loss_total: float
     loss_components: dict[str, float]
     batch_size: int
@@ -68,13 +45,7 @@ class Method(ABC):
 
     @abstractmethod
     def build(self, total_epochs: int, model_builder) -> None:
-        """Construct model(s), optimizer(s), scheduler(s).
-
-        Args:
-            total_epochs: the epoch budget (for cosine annealing T_max).
-            model_builder: a zero-arg callable returning a freshly-initialized
-                network. Methods that need N networks call it N times.
-        """
+        """Construct model(s), optimizer(s), scheduler(s); model_builder is a zero-arg net factory."""
 
     @abstractmethod
     def train_step(
@@ -83,16 +54,10 @@ class Method(ABC):
         epoch: int,
         scaler: torch.amp.GradScaler,
     ) -> MethodOutput:
-        """One gradient step. Handles forward, loss, backward, and optimizer
-        step(s) for all internal networks.
-
-        ``batch`` is (image, label, idx) for normal methods and
-        (image1, image2, label, idx) when ``requires_two_views`` is True.
-        """
+        """One gradient step (forward, loss, backward, optimizer step) for all internal networks."""
 
     def scheduler_step(self) -> None:
-        """Called once per epoch after all batches. Default: step every
-        scheduler the method owns."""
+        """Step every scheduler the method owns (once per epoch)."""
         for sched in self._all_schedulers():
             sched.step()
 
@@ -108,16 +73,7 @@ class Method(ABC):
     def predict(
         self, loader, device: torch.device | None = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Standard evaluation loop. Returns (y_true, y_pred, y_prob).
-
-        y_true: (N,) true labels.
-        y_pred: (N,) argmax predictions.
-        y_prob: (N, C) softmax probabilities.
-
-        Samples are returned in LOADER ORDER (so loader must not shuffle).
-        Test/val loaders always provide single-view (img, label, idx)
-        batches regardless of ``requires_two_views``.
-        """
+        """Evaluate in loader order (no shuffle); returns (y_true, y_pred, y_prob)."""
         if device is None:
             device = self.device
         model = self.inference_model()

@@ -9,13 +9,7 @@ import torch
 
 
 def seed_everything(seed: int, deterministic: bool = True) -> None:
-    """Seed Python, NumPy, PyTorch, CUDA. When deterministic=True, also set
-    cudnn flags for bit-identical runs across machines.
-
-    Note: deterministic mode is slower. For Stage 3 we accept non-bitwise
-    reproducibility across machines (both HPC nodes) but still set torch seed
-    so within-run randomness is controlled.
-    """
+    """Seed Python, NumPy, PyTorch, and CUDA. deterministic=True also sets cudnn flags for bit-identical runs; Stage 3 uses deterministic=False."""
     os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
     np.random.seed(seed)
@@ -30,6 +24,5 @@ def seed_everything(seed: int, deterministic: bool = True) -> None:
 
 
 def fold_seed(global_seed: int, fold_id: int) -> int:
-    """Deterministic per-fold seed. Used for noise injection and per-fold
-    stochastic operations."""
+    """Deterministic per-fold seed for noise injection and per-fold stochastic operations."""
     return global_seed * 10_000 + fold_id

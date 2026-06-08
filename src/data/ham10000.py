@@ -1,7 +1,8 @@
-"""HAM10000 dataset.
+"""
+HAM10000 dataset and the fixed alphabetical class-index mapping.
 
-The class index mapping is FIXED and ALPHABETICAL. Every metric, plot, and
-model head in the project relies on this ordering. Do not change it.
+The class ordering is FIXED and ALPHABETICAL; every metric, plot, and model head
+depends on it. Do not reorder.
 """
 from __future__ import annotations
 
@@ -29,17 +30,7 @@ def index_to_class(idx: int) -> str:
 
 
 class HamDataset(Dataset):
-    """In-memory HAM10000 dataset.
-
-    Reads a metadata CSV (columns must include `image_id` and `dx`, and
-    optionally `fold`). Loads all images into memory at init for fast training
-    (the full 7,470-image imbalanced set is ~4.5 GB in uint8 form, which fits
-    comfortably in V100 RAM).
-
-    Returns (image_tensor, label_index, sample_index). The sample_index is the
-    row index into the metadata DataFrame and is REQUIRED by ELR for target
-    buffer updates. Other methods can ignore it.
-    """
+    """In-memory HAM10000 dataset; returns (image, label, sample_index). The index is required by ELR."""
 
     def __init__(
         self,

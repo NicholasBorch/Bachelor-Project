@@ -1,21 +1,28 @@
-"""SCE: Symmetric Cross-Entropy (Wang et al. 2019).
+"""
+SCE: Symmetric Cross-Entropy (Wang et al. 2019), a drop-in replacement for CE.
 
-L = alpha * CE + beta * RCE
+    L_SCE = alpha * CE + beta * RCE
 
-RCE is the "reverse" cross-entropy where ground-truth is treated as the
-prediction and predictions are treated as ground-truth. Since q(y|x) = 1 and
-q(k|x) = 0 for k != y, log(0) is replaced by a clipping constant A.
+Reverse cross-entropy swaps label and prediction, scoring the one-hot label
+against the prediction: RCE = -sum_k p(k|x) log q(k|x). Because q is one-hot
+(q(y|x)=1, q(k!=y|x)=0), log 0 is undefined, so following the paper we set
+log 0 = A for a negative constant A. The per-sample RCE then collapses to a
+closed form:
 
-Per-sample derivation:
-    RCE = -Σ_k p(k|x) * log q(k|x)
-        = -p(y|x) * log(1) - Σ_{k != y} p(k|x) * A
-        = -A * (1 - p(y|x))
+    RCE = -p(y|x)*log 1 - sum_{k!=y} p(k|x)*A = -A * (1 - p(y|x)),
 
-CRITICAL (per paper §5.2): class weights apply to CE term only, not RCE. On
-the balanced dataset we pass class_weights=None so this is moot; on imbalanced
-the distinction matters.
+which is exactly what forward() computes as (-A) * (1 - p_y). CE pulls hardest
+when p_y is small (its pull is 1 - p_y), so it presses hardest on samples it
+disagrees with — including corrupted ones. RCE carries an extra factor of the
+model's own confidence p_y, so it fades as p_y -> 0 and reinforces only labels
+the model already supports; that asymmetry is what makes RCE noise-tolerant.
 
-Hyperparameters from CIFAR-10 settings: alpha=0.1, beta=1.0, A=-4.0.
+Class weights (imbalanced arm) apply to the CE term ONLY: CE is indexed by the
+true label, whereas RCE already weights each class by the model's prediction
+p_k. On the balanced arm class_weights=None, so the distinction is moot.
+
+alpha, beta, A are tuned per protocol via Optuna; the paper's CIFAR-10 reference
+values are alpha=0.1, beta=1.0, A=-4.0.
 """
 from __future__ import annotations
 

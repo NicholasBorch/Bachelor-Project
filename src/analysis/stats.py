@@ -1,29 +1,11 @@
-"""Statistical tests and confidence intervals for Stage 4.
+"""
+Paired Wilcoxon signed-rank tests and confidence intervals for Stage 4.
 
-Two families of paired Wilcoxon signed-rank tests are implemented. Both
-use pairing by fold (each method sees the same 10 folds) and both are
-non-parametric, appropriate for small n (10 folds) and non-normal metric
-distributions.
-
-1. Method-vs-Baseline (``wilcoxon_vs_baseline``):
-   At each (dataset, init, optim, τ), test whether each robust method
-   differs from the CE baseline. Quantifies the benefit (or lack of
-   benefit) of the noise-handling mechanism.
-
-2. Noise-Sensitivity (``wilcoxon_vs_clean``):
-   At each (dataset, init, optim, method), test whether the method's
-   performance at τ > 0 differs from its own performance at τ = 0.
-   Quantifies each method's resilience to label noise.
-
-Both families can be corrected for multiple testing via
-``apply_multiple_testing_corrections``, which produces Bonferroni and
-Holm-Bonferroni adjusted p-values. Holm is strictly more powerful than
-Bonferroni while still controlling the family-wise error rate, and is
-generally preferred; both are reported so the reader can decide.
-
-Raw p-values are encoded into a ``significance_code`` column:
-    ``***`` for p < 0.001, ``**`` for p < 0.01, ``*`` for p < 0.05,
-    ``ns`` otherwise.
+Two families, both paired by fold and non-parametric: (1) wilcoxon_vs_baseline tests
+each robust method against the CE baseline at each (dataset, init, optim, tau); (2)
+wilcoxon_vs_clean tests each method's tau>0 against its own tau=0.
+apply_multiple_testing_corrections adds Bonferroni and (OLD version - NOT USED) Holm-Bonferroni
+family-wise corrections. Raw p is encoded in significance_code (***/**/*/ns).
 """
 from __future__ import annotations
 
@@ -60,12 +42,7 @@ def _significance_code(p: float) -> str:
 
 
 def _wilcoxon_safe(diffs: np.ndarray) -> tuple[float, float]:
-    """Run scipy.stats.wilcoxon with defensive handling.
-
-    Returns (statistic, p_value). Returns (nan, 1.0) for all-zero diffs
-    (scipy raises on this; we treat as unambiguously not significant) and
-    (nan, nan) on any other ValueError.
-    """
+    """scipy wilcoxon with defensive handling: (nan, 1.0) for all-zero diffs, (nan, nan) on other errors."""
     if np.all(diffs == 0):
         return float("nan"), 1.0
     try:
@@ -76,33 +53,14 @@ def _wilcoxon_safe(diffs: np.ndarray) -> tuple[float, float]:
     return float(res.statistic), float(res.pvalue)
 
 
-# ─── Family 1: method vs baseline ──────────────────────────────────────────
+# Family 1: method vs baseline
 
 def wilcoxon_vs_baseline(
     df: pd.DataFrame,
     metric: str = "balanced_accuracy",
     min_folds: int = MIN_FOLDS_FOR_WILCOXON,
 ) -> pd.DataFrame:
-    """Paired Wilcoxon tests of each robust method against the CE baseline.
-
-    For each (dataset, init, optim, tau), compare each robust method's
-    per-fold metric against the baseline's per-fold metric, paired by
-    fold via an inner merge.
-
-    Args:
-        df: Tidy results DataFrame from
-            :func:`~src.analysis.aggregate.load_all_results`.
-        metric: Scalar metric column to test on.
-        min_folds: Skip rows with fewer than this many paired folds.
-
-    Returns:
-        DataFrame with columns::
-
-            dataset, init, optim, tau, method,
-            n_pairs, mean_diff, median_diff,
-            wilcoxon_statistic, p_value,
-            significance_code, significant_at_05
-    """
+    """Paired Wilcoxon of each robust method vs the CE baseline, per (dataset, init, optim, tau)."""
     if df.empty or metric not in df.columns:
         return _empty_vs_baseline_df()
 
@@ -153,7 +111,7 @@ def wilcoxon_vs_baseline(
     ).reset_index(drop=True)
 
 
-# ─── Family 2: noise sensitivity (tau=0 vs tau>0 per method) ──────────────
+# Family 2: noise sensitivity (tau=0 vs tau>0 per method)
 
 def wilcoxon_vs_clean(
     df: pd.DataFrame,
@@ -162,24 +120,7 @@ def wilcoxon_vs_clean(
     clean_tau: float = 0.0,
     tol: float = 1e-6,
 ) -> pd.DataFrame:
-    """Per-method noise-sensitivity: each τ > 0 against the method's own τ = 0.
-
-    For each (dataset, init, optim, method), compare metric at τ = clean_tau
-    against metric at each τ ≠ clean_tau, paired by fold.
-
-    Negative ``mean_diff`` indicates the method performs WORSE under noise
-    (the expected direction for methods that are not fully noise-robust).
-    Small-magnitude ``mean_diff`` together with non-significant p suggests
-    the method maintains performance.
-
-    Returns:
-        DataFrame with columns::
-
-            dataset, init, optim, method, tau,
-            n_pairs, mean_diff, median_diff,
-            wilcoxon_statistic, p_value,
-            significance_code, significant_at_05
-    """
+    """Per-method noise sensitivity: each tau>0 vs the method's own tau=0, paired by fold."""
     if df.empty or metric not in df.columns:
         return _empty_vs_clean_df()
 
@@ -230,7 +171,7 @@ def wilcoxon_vs_clean(
     ).reset_index(drop=True)
 
 
-# ─── Multiple-testing corrections ─────────────────────────────────────────
+# Multiple-testing corrections
 
 def apply_multiple_testing_corrections(
     df: pd.DataFrame,
@@ -238,39 +179,7 @@ def apply_multiple_testing_corrections(
     family_cols: list[str] | None = None,
     alpha: float = 0.05,
 ) -> pd.DataFrame:
-    """Apply Bonferroni and Holm-Bonferroni corrections within each family.
-
-    Both corrections control the family-wise error rate (probability of
-    any false positive) at the specified ``alpha``. Holm-Bonferroni is
-    uniformly more powerful than plain Bonferroni and should generally be
-    preferred; both are reported so readers can decide.
-
-    Args:
-        df: Tidy DataFrame containing a column of raw p-values.
-        p_col: Name of the p-value column.
-        family_cols: Column names defining test families. Each unique
-            combination is treated as an independent family and correction
-            is applied within it. If ``None``, the entire DataFrame is
-            treated as one family (global correction).
-        alpha: Family-wise error-rate target.
-
-    Returns:
-        A copy of ``df`` with added columns::
-
-            p_value_bonferroni       (min(p * n_family, 1.0))
-            significant_bonferroni   (bool at alpha)
-            p_value_holm             (Holm-adjusted)
-            significant_holm         (bool at alpha)
-            family_size              (int, tests in the family)
-
-        NaN p-values are preserved as-is; they do not consume a slot in
-        the family size.
-
-    Holm-Bonferroni procedure:
-        Sort p-values ascending: p_(1) ≤ p_(2) ≤ ... ≤ p_(n).
-        Adjusted p_(i) = max_{j ≤ i} ((n - j + 1) * p_(j)), clipped to 1.0.
-        Reject at alpha iff the Holm-adjusted p < alpha.
-    """
+    """Add Bonferroni and Holm-Bonferroni adjusted p-values (and significance flags) within each family."""
     out = df.copy().reset_index(drop=True)
     out["p_value_bonferroni"] = np.nan
     out["significant_bonferroni"] = False
@@ -322,7 +231,7 @@ def apply_multiple_testing_corrections(
     return out
 
 
-# ─── Bootstrap CI ─────────────────────────────────────────────────────────
+# Bootstrap CI
 
 def bootstrap_ci(
     values: np.ndarray | list[float],
@@ -330,20 +239,7 @@ def bootstrap_ci(
     alpha: float = 0.05,
     random_state: int | None = 0,
 ) -> tuple[float, float]:
-    """Percentile bootstrap confidence interval for the mean.
-
-    Default ``n_bootstrap=2000`` matches the thesis protocol.
-
-    Args:
-        values: Observations to resample with replacement.
-        n_bootstrap: Number of bootstrap resamples.
-        alpha: Significance level (returns a (1-alpha) CI).
-        random_state: Seed for reproducibility.
-
-    Returns:
-        (lower, upper) bounds of the percentile CI. Returns (nan, nan) if
-        fewer than two non-NaN values are provided.
-    """
+    """Percentile bootstrap CI for the mean (n_bootstrap=2000); (nan, nan) if fewer than two valid values."""
     arr = np.asarray(values, dtype=float)
     arr = arr[~np.isnan(arr)]
     if arr.size < 2:
@@ -360,7 +256,7 @@ def bootstrap_ci(
     return (lo, hi)
 
 
-# ─── Helpers ──────────────────────────────────────────────────────────────
+# Helpers
 
 def _empty_vs_baseline_df() -> pd.DataFrame:
     return pd.DataFrame(columns=[

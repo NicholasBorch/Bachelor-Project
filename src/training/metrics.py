@@ -1,23 +1,10 @@
-"""Evaluation metrics computed on the clean test fold + noise-label diagnostics.
+"""
+Test-set metrics and noise-label interaction diagnostics.
 
-Primary test-set metrics (reported for every Stage 3 run):
-    - balanced_accuracy (mean per-class recall)
-    - macro_f1
-
-Supportive:
-    - macro_auc (OvR)
-
-Diagnostic:
-    - per_class_f1 (dict)
-    - confusion_matrix (raw counts)
-    - weighted_f1 (reference)
-
-Noise-label interaction (computed SEPARATELY on the training set after
-training completes, via `compute_noise_label_interaction`):
-    - nta  (Noise Transition Accuracy)
-    - lnmr (Label Noise Memorization Rate)
-
-See PROJECT_DOCUMENTATION §2.4 for definitions and rationale.
+Test set (per Stage 3 run): balanced_accuracy (primary), macro_f1 (co-primary),
+macro_auc (supportive), per_class_f1, confusion_matrix, weighted_f1. Noise-label
+interaction (computed on the training set after training): nta, lnmr. See
+PROJECT_DOCUMENTATION §2.4.
 """
 from __future__ import annotations
 
@@ -39,31 +26,14 @@ def compute_metrics(
     y_pred: np.ndarray,
     y_prob: np.ndarray,
 ) -> dict[str, Any]:
-    """Compute the standard test-set metric suite.
-
-    Args:
-        y_true: (N,) int array of true class indices.
-        y_pred: (N,) int array of predicted class indices.
-        y_prob: (N, C) softmax probabilities.
-
-    Returns:
-        dict with keys:
-            - balanced_accuracy      (primary: mean per-class recall)
-            - macro_f1               (co-primary)
-            - weighted_f1            (reference)
-            - macro_auc              (supportive)
-            - per_class_f1           (diagnostic: {class_name -> F1})
-            - confusion_matrix       (diagnostic: raw counts, list-of-lists)
-            - n_samples
-    """
+    """Compute the standard test-set metric suite from (y_true, y_pred, y_prob)."""
     y_true = np.asarray(y_true)
     y_pred = np.asarray(y_pred)
     y_prob = np.asarray(y_prob)
 
     labels_all = list(range(NUM_CLASSES))
 
-    # Macro AUC can fail if some class is completely absent from y_true;
-    # catch that cleanly.
+    # Macro AUC checkup
     try:
         macro_auc = float(roc_auc_score(
             y_true, y_prob, multi_class="ovr", average="macro", labels=labels_all,
@@ -94,45 +64,7 @@ def compute_noise_label_interaction(
     y_noisy: np.ndarray,
     y_clean: np.ndarray,
 ) -> dict[str, Any]:
-    """Compute NTA and LNMR on the training set.
-
-    Both metrics are conditioned on the subset of samples whose training
-    label differs from the clean label (the "flipped subset"):
-
-        NTA  = P( y_pred == y_clean | y_noisy != y_clean )
-        LNMR = P( y_pred == y_noisy | y_noisy != y_clean )
-
-    Intuition:
-      - High NTA means the model recovered the true class despite being
-        supervised on the wrong label — the noise-handling mechanism worked.
-      - High LNMR means the model memorized the corrupted label — the
-        classic failure mode of cross-entropy under noisy supervision.
-      - NTA + LNMR ≤ 1. The remaining mass corresponds to predictions that
-        match neither the clean nor the noisy label (the model is wrong
-        in a third way).
-
-    `y_pred_train` must be produced from the trained final model, run over
-    the training set with **test-time transforms (no augmentation)**, so
-    that the prediction reflects what the model "really thinks" about the
-    image rather than a random augmented view.
-
-    At τ = 0 the flipped subset is empty; NTA and LNMR are undefined and
-    returned as NaN.
-
-    Args:
-        y_pred_train: (N,) int predictions on the training set.
-        y_noisy: (N,) int training labels as used for gradient updates
-            (possibly corrupted).
-        y_clean: (N,) int ground-truth clean labels.
-
-    Returns:
-        dict with keys:
-            - nta                  (float; NaN if no flipped samples)
-            - lnmr                 (float; NaN if no flipped samples)
-            - n_flipped            (int)
-            - n_train              (int)
-            - empirical_flip_rate  (float)
-    """
+    """NTA=P(pred==clean | flipped) and LNMR=P(pred==noisy | flipped) on the training set; NaN at tau=0. y_pred_train must use test-time transforms."""
     y_pred_train = np.asarray(y_pred_train).astype(np.int64)
     y_noisy = np.asarray(y_noisy).astype(np.int64)
     y_clean = np.asarray(y_clean).astype(np.int64)
@@ -174,11 +106,7 @@ def compute_noise_label_interaction(
 
 
 def aggregate_metrics(fold_metrics: list[dict[str, Any]]) -> dict[str, Any]:
-    """Aggregate per-fold metrics into mean and std.
-
-    Scalar metrics get a {mean, std} dict. Per-class F1 gets per-class mean/std.
-    Confusion matrices are summed (not averaged).
-    """
+    """Aggregate per-fold metrics: scalars to mean/std, per-class F1 mean/std, confusion matrices summed."""
     if not fold_metrics:
         return {}
 

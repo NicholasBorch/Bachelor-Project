@@ -1,8 +1,4 @@
-"""Per-stage manifest files.
-
-Every stage script writes a manifest on completion so later stages can verify
-prerequisites and so the user has a cheap inspection target.
-"""
+"""Per-stage manifest files, written on stage completion for prerequisite checks and cheap inspection."""
 from __future__ import annotations
 
 import json
@@ -32,15 +28,7 @@ def write_manifest(
     outputs: list[str] | None = None,
     extra: dict[str, Any] | None = None,
 ) -> None:
-    """Write a manifest JSON describing what a stage produced.
-
-    Args:
-        path: output file path.
-        stage: short stage identifier, e.g. "stage1c".
-        params: the CLI arguments / parameters the stage ran with.
-        outputs: list of files (or glob patterns) the stage produced.
-        extra: any additional fields (counts, metrics, notes).
-    """
+    """Write a manifest JSON describing what a stage produced."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 

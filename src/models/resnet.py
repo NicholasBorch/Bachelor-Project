@@ -1,8 +1,6 @@
-"""ResNet builder.
-
-Supports ResNet-18 (used only for OOF probability collection in Stage 1b) and
-ResNet-34 (used for all main training in Stage 2 and Stage 3, and for both
-clf_net and ref_net in AsyCo — see PROJECT_DOCUMENTATION.md §8.4).
+"""
+ResNet builder. ResNet-18 for OOF probability collection (Stage 1b); ResNet-34 for
+all main training (Stages 2-3, and both clf_net and ref_net in AsyCo).
 """
 from __future__ import annotations
 
@@ -22,15 +20,7 @@ def build_resnet(
     pretrained: bool = True,
     weights_name: str = "IMAGENET1K_V1",
 ) -> nn.Module:
-    """Build a ResNet with a replaced final FC layer.
-
-    Args:
-        num_classes: output dimensionality (7 for HAM10000).
-        depth: 18 or 34.
-        pretrained: if True, load ImageNet weights.
-        weights_name: which ImageNet weight set to use. Only IMAGENET1K_V1 is
-            supported for the depths we use.
-    """
+    """Build a ResNet-18/34 with a replaced final FC; optionally ImageNet-pretrained."""
     if depth not in (18, 34):
         raise ValueError(f"Only depths 18 and 34 are supported, got {depth}")
 

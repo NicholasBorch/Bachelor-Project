@@ -1,23 +1,10 @@
-"""Walk the Stage 3 results directory tree and build tidy pandas DataFrames.
+"""
+Walk the Stage 3 results tree and build tidy DataFrames for Stage 4.
 
-This module is the entry point for Stage 4 analysis. It reads every
-``test_metrics.json`` under ``results/training/`` and every
-``selected_budget.json`` under ``results/epoch_selection/`` and returns
-tidy DataFrames ready for plotting and statistical testing.
-
-Path conventions (set by the runner in batch 4):
-
-    results/training/{method}/{dataset}/{init}_{optim}/tau_NN/fold_NN/test_metrics.json
-    results/epoch_selection/{dataset}/{method}/selected_budget.json
-
-The loader is **resilient to partial results**: if a file is missing or
-malformed it logs a warning and skips the row rather than crashing. This
-matters because Stage 4 is run while Stage 3 jobs may still be in flight.
-
-Each ``test_metrics.json`` contains the standard test-set metric suite
-plus the training-set noise-label interaction diagnostics (nta, lnmr,
-n_flipped, n_train, empirical_flip_rate) — see PROJECT_DOCUMENTATION §2.4.
-NTA and LNMR are NaN at τ=0 (the flipped subset is empty).
+Reads every results/training/.../test_metrics.json and every
+results/epoch_selection/.../selected_budget.json. Resilient to partial results
+(missing or malformed files are logged and skipped), since Stage 4 may run while
+Stage 3 jobs are still in flight. NTA/LNMR are NaN at tau=0.
 """
 from __future__ import annotations
 
@@ -32,7 +19,7 @@ from src.data.ham10000 import CLASS_NAMES
 
 logger = logging.getLogger(__name__)
 
-# ----- path parsing ---------------------------------------------------------
+# path parsing
 
 # results/training/{method}/{dataset}/{init}_{optim}/tau_NN/fold_NN/test_metrics.json
 _INIT_OPTIM_RE = re.compile(r"^(?P<init>[a-z0-9]+)_(?P<optim>[a-z0-9]+)$")
@@ -40,8 +27,7 @@ _TAU_RE = re.compile(r"^tau_(?P<tau>\d{2})$")
 _FOLD_RE = re.compile(r"^fold_(?P<fold>\d{2})$")
 
 # Scalar metric columns loaded from test_metrics.json, in the order they are
-# written into the output DataFrame. Cohen's kappa is intentionally NOT in
-# this list (removed per PROJECT_DOCUMENTATION §2.4).
+# written into the output DataFrame.
 _SCALAR_TEST_METRICS = (
     "balanced_accuracy",
     "macro_f1",
@@ -103,23 +89,11 @@ def _read_metrics(metrics_path: Path) -> dict | None:
         return None
 
 
-# ----- main loaders ---------------------------------------------------------
+# main loaders
 
 
 def load_all_results(results_dir: Path) -> pd.DataFrame:
-    """Walk ``results_dir/training/*/*/*/*/*/test_metrics.json`` and build a tidy df.
-
-    Returns:
-        A tidy DataFrame with columns::
-
-            method, dataset, init, optim, tau, fold,
-            balanced_accuracy, macro_f1, weighted_f1, macro_auc, n_samples,
-            nta, lnmr, n_flipped, n_train, empirical_flip_rate,
-            per_class_f1_akiec, ..., per_class_f1_vasc,
-            confusion_matrix (list-of-lists)
-
-        Empty DataFrame (with correct columns) if no results are present.
-    """
+    """Load all training/.../test_metrics.json into a tidy DataFrame (empty with schema if none)."""
     results_dir = Path(results_dir)
     training_root = results_dir / "training"
 
@@ -223,24 +197,11 @@ def load_selected_budgets(results_dir: Path) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values(["dataset", "method"]).reset_index(drop=True)
 
 
-# ----- aggregation helpers --------------------------------------------------
+# aggregation helpers
 
 
 def aggregate_mean_std(df: pd.DataFrame) -> pd.DataFrame:
-    """Collapse the fold axis by computing mean and std for every scalar metric.
-
-    Includes NTA and LNMR in the aggregation. At τ=0, both will be aggregated
-    over an all-NaN column and return NaN mean/std — this is the correct
-    behaviour (the metrics are undefined when no samples were flipped).
-
-    Args:
-        df: Output of :func:`load_all_results`.
-
-    Returns:
-        DataFrame indexed by (dataset, init, optim, method, tau), with
-        columns ``{metric}_mean`` and ``{metric}_std`` for every scalar
-        metric, plus ``n_folds`` (how many folds contributed).
-    """
+    """Collapse the fold axis to per-metric mean/std (incl. NTA/LNMR, NaN at tau=0), plus n_folds."""
     if df.empty:
         return df.copy()
 
@@ -269,7 +230,7 @@ def aggregate_mean_std(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-# ----- private helpers ------------------------------------------------------
+# private helpers
 
 
 def _empty_results_df() -> pd.DataFrame:

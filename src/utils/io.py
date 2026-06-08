@@ -8,10 +8,7 @@ import yaml
 
 
 def project_root() -> Path:
-    """Resolve the project root directory by walking up from this file's location.
-
-    This file lives at <root>/src/utils/io.py, so root is parents[2].
-    """
+    """Resolve the project root (this file is <root>/src/utils/io.py, so parents[2])."""
     return Path(__file__).resolve().parents[2]
 
 
@@ -25,25 +22,7 @@ def load_config(
     *relative_paths: str,
     configs_dir: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Load and merge multiple YAML configs from the configs/ directory.
-
-    Configs are namespaced by their parent directory:
-      - base.yaml                -> merged at top level
-      - data/<name>.yaml         -> merged under cfg["data"]
-      - method/<name>.yaml       -> merged under cfg["method"]
-      - optim/<name>.yaml        -> merged under cfg["optim"]
-      - model/<name>.yaml        -> merged under cfg["model"]
-      - noise/<name>.yaml        -> merged under cfg["noise"]
-
-    This namespacing prevents collisions between, e.g., `name` fields in
-    different config sections.
-
-    Example:
-        cfg = load_config("base.yaml", "data/imbalanced.yaml", "method/elr.yaml")
-        cfg["seed"]            # from base.yaml
-        cfg["data"]["name"]    # "imbalanced"
-        cfg["method"]["name"]  # "elr"
-    """
+    """Load and merge YAML configs from configs/, namespacing each by its parent dir (data/, method/, optim/, model/, noise/) so section `name` fields don't collide."""
     if configs_dir is None:
         configs_dir = project_root() / "configs"
     configs_dir = Path(configs_dir)

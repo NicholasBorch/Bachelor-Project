@@ -1,41 +1,16 @@
-"""Top-level training orchestration.
+"""
+Top-level training orchestration.
 
-One entry point — `run_training` — takes a fully-resolved config and trains
-one model on one fold end-to-end. The same function is used by:
+run_training trains one model on one fold end-to-end. Stage 2 passes val_df (per-
+epoch validation logged) and test_df=None (the test fold is never touched). Stage 3
+passes test_df (final clean-test eval + training-set NTA/LNMR) and val_df=None.
 
-- Stage 2 (epoch budget selection): called with `val_df` set so per-epoch
-  validation balanced accuracy is logged alongside training loss.
-  `test_df` is `None` in Stage 2 — the fold's test set must not be touched
-  (PROJECT_DOCUMENTATION §10, item 4).
-- Stage 3 (final method training): called with `test_df` set and
-  `val_df=None`; both the final clean test evaluation and the
-  training-set noise-label interaction diagnostics (NTA, LNMR) are
-  computed and saved.
-
-Design constraints enforced here:
-
-- HamDataset returns (image, label, sample_index) — the sample_index is
-  required by ELR's target buffer and must flow through every loader.
-- Methods declaring ``requires_two_views = True`` (currently only
-  ``asyco_divmix``) get their TRAIN dataset wrapped in
-  ``TwoViewHamDataset`` so each batch is (img1, img2, label, idx). The
-  TEST and VAL loaders are unaffected — both still produce single-view
-  batches for ``predict()``.
-- For the imbalanced dataset, a WeightedRandomSampler is used and CE losses
-  are class-weighted via inverse frequency. For the balanced dataset, both
-  are disabled and we rely on shuffled sampling + unweighted CE (consistent
-  with PROJECT_DOCUMENTATION §2.3.6).
-- Mixed precision is uniform across all methods and toggled off on CPU.
-- The fold's test set is loaded from `test_df` only when `test_df is not
-  None`; when it is None (Stage 2), we never build a test loader and never
-  evaluate on it.
-- NTA/LNMR require a SECOND pass over the training set with test-time
-  transforms (no augmentation). This runs only when `test_df is not
-  None` and `dx_clean` exists on `train_df`. Cost is one forward pass over
-  the training set at the end of training.
-- All artifacts — the resolved config, the per-epoch log, and (when a test
-  set is provided) the final test metrics enriched with NTA/LNMR — are
-  written to `output_dir` so downstream analysis has a single place to look.
+HamDataset yields (image, label, sample_index); the index is required by ELR.
+Methods with requires_two_views=True (only asyco_divmix) get the TRAIN set wrapped
+in TwoViewHamDataset; test/val stay single-view. The imbalanced dataset uses a
+WeightedRandomSampler and class-weighted CE.
+Mixed precision is uniform and off on CPU. NTA/LNMR need a second test-time pass
+over the training set. All artifacts are written to output_dir.
 """
 from __future__ import annotations
 
@@ -62,18 +37,7 @@ from src.utils.seed import seed_everything
 
 
 class StopTraining(Exception):
-    """Raised inside an epoch_callback to request graceful early termination.
-
-    Caught at the per-epoch loop boundary in run_training. The post-epoch
-    record is already written to training_log.jsonl before the exception
-    propagates, and final test evaluation (Stage 3 mode) does NOT run when
-    training is stopped this way — the partial run is treated as a
-    legitimately-terminated training, not a completed one.
-
-    The Optuna search uses this to honor pruning decisions without leaking
-    Optuna concepts into runner.py. Other callers can use it for any
-    reasonable early-stopping criterion.
-    """
+    """Raised in an epoch_callback to request graceful early termination (used for Optuna pruning)."""
     pass
 
 
@@ -114,12 +78,7 @@ def _build_loaders(
     val_df: pd.DataFrame | None,
     requires_two_views: bool = False,
 ) -> tuple[DataLoader, DataLoader | None, DataLoader | None, np.ndarray]:
-    """Construct train / (optional test) / (optional val) DataLoaders.
-
-    When ``requires_two_views`` is True, the TRAIN dataset is wrapped in
-    ``TwoViewHamDataset`` so each item is (img1, img2, label, idx) instead
-    of (img, label, idx). Test and val loaders are unchanged regardless.
-    """
+    """Construct train / optional test / optional val DataLoaders (train wrapped two-view if required)."""
     image_size = int(cfg["image_size"])
     resize_size = int(round(image_size * 256 / 224))
     batch_size = int(cfg["data"]["batch_size"])
@@ -195,17 +154,7 @@ def _predict_on_train_set(
     cfg: dict,
     device: torch.device,
 ) -> np.ndarray:
-    """Run the trained model over the training set with TEST-TIME transforms
-    and return argmax predictions (one int per sample, aligned with
-    train_df row order).
-
-    Using test-time transforms (no augmentation, deterministic
-    resize+centercrop) is essential: NTA/LNMR should reflect what the
-    trained model thinks about each image, not what it thinks about a
-    single random augmented view of it. Always uses the standard
-    single-view ``HamDataset`` regardless of the method's training-time
-    two-view requirement.
-    """
+    """Run the trained model over the training set with test-time transforms; return argmax preds in train_df order."""
     image_size = int(cfg["image_size"])
     resize_size = int(round(image_size * 256 / 224))
     batch_size = int(cfg["data"]["batch_size"])
@@ -235,32 +184,7 @@ def _compute_per_class_noise_diagnostics(
     y_clean: np.ndarray,
     num_classes: int,
 ) -> dict[str, Any]:
-    """Per-class breakdowns of NTA / LNMR, restricted to FLIPPED samples
-    (those where y_noisy != y_clean).
-
-    Two complementary conditioning views are emitted:
-
-      *_by_clean[c]
-          Among flipped samples whose true (clean) class is c, the
-          fraction for which the model predicted c (NTA) and the
-          fraction for which it predicted the noisy label (LNMR).
-          Answers: "for true class c, how robust is the model to
-          mislabeling away from c?"
-
-      *_by_noisy[c]
-          Among flipped samples whose noisy label is c (i.e., samples
-          mislabeled AS c), the fraction for which the model predicted
-          the true (clean) label (NTA) and the fraction for which it
-          predicted c (LNMR). Answers: "for samples mislabeled as c,
-          how often does the model memorize c?"
-
-    For empty buckets (no flipped samples for the given class under the
-    chosen conditioning), the corresponding entry is None — preserved
-    through json.dumps as null and ignored by downstream aggregation.
-
-    Returns a dict with six keys (4 metric lists + 2 count lists), each
-    of length num_classes.
-    """
+    """Per-class NTA/LNMR on flipped samples, conditioned on clean class (*_by_clean) and noisy class (*_by_noisy); None for empty buckets."""
     flipped = y_noisy != y_clean
     per_class_nta_by_clean: list[float | None] = []
     per_class_lnmr_by_clean: list[float | None] = []
@@ -319,52 +243,7 @@ def run_training(
     epoch_callback=None,
     track_train_diagnostics_every: int | None = None,
 ) -> dict[str, Any]:
-    """Train one model on one fold end-to-end.
-
-    Args:
-        cfg: the fully-merged config (base + data + model + optim + method + noise).
-        train_df: DataFrame with columns `image_id`, `dx` (possibly noisy),
-            and typically `dx_clean` for bookkeeping and NTA/LNMR. Training
-            uses `dx`.
-        test_df: clean-labeled test set, or `None`. If `None`, no final
-            test evaluation is performed and no `test_metrics.json` is
-            written — Stage 2 mode.
-        images_dir: directory with the JPEGs referenced by `image_id`.
-        method_name: one of "baseline", "sce", "elr", "asyco", "asyco_divmix".
-        total_epochs: the epoch budget (cosine-annealing T_max).
-        output_dir: where to write `config.yaml`, `training_log.jsonl`,
-            and (Stage 3) `test_metrics.json`.
-        val_df: optional validation DataFrame for per-epoch monitoring.
-        seed: optional per-fold seed.
-        epoch_callback: optional callable ``(epoch_idx, record) -> None``
-            invoked after each epoch's record is written to the JSONL log.
-            ``record`` is the same dict that was just appended (epoch,
-            train_loss, loss_components, lr, epoch_time_s, and val_*
-            metrics if val_df was provided). The callback may raise
-            ``StopTraining`` to request early termination of training;
-            in that case Stage 3 final test evaluation is skipped and an
-            empty dict is returned (same as Stage 2 mode). Any other
-            exception propagates normally. Callbacks see post-write,
-            post-validation state — they should not mutate ``record``.
-        track_train_diagnostics_every: optional int cadence (in epochs)
-            for tracking NTA / LNMR on the training set during training.
-            When set to N > 0 and ``dx_clean`` is present on train_df,
-            the model is run over the training set (with test-time
-            transforms) every N epochs, scalar NTA / LNMR plus per-class
-            breakdowns are computed, and the resulting dict is added
-            to that epoch's JSONL record under the key
-            ``train_diagnostics``. A snapshot is always also taken at
-            the final epoch. Each inference pass adds ~1 minute to the
-            epoch on a V100 with 7,470 imbalanced HAM10000 samples;
-            choose N to balance temporal resolution against cost.
-            Default ``None`` disables per-epoch tracking (existing
-            callers see unchanged behavior).
-
-    Returns:
-        The final test metrics dict (with NTA/LNMR merged in when
-        `dx_clean` is available on `train_df`) in Stage 3; empty dict in
-        Stage 2 or when training was stopped early via epoch_callback.
-    """
+    """Train one model on one fold; returns final test metrics (with NTA/LNMR) in Stage 3, else {}."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -429,10 +308,7 @@ def run_training(
 
     stopped_early = False
 
-    # Set up cached clean / noisy label arrays for per-epoch diagnostics.
-    # Only meaningful when `dx_clean` is present and the user opted in via
-    # ``track_train_diagnostics_every``. The labels are computed once here
-    # and reused per snapshot to avoid repeated DataFrame -> ndarray work.
+    # cached clean/noisy label arrays for per-epoch diagnostics (computed once)
     _diag_enabled = (
         track_train_diagnostics_every is not None
         and int(track_train_diagnostics_every) > 0
@@ -488,10 +364,7 @@ def run_training(
             record["val_weighted_f1"] = float(val_metrics["weighted_f1"])
             record["val_macro_auc"] = float(val_metrics["macro_auc"])
 
-        # Per-epoch training-set noise-label diagnostics. Triggered every
-        # `_diag_every` epochs and always on the final epoch. Adds a
-        # `train_diagnostics` sub-dict to the record carrying scalar
-        # NTA / LNMR plus per-class breakdowns.
+        # per-epoch training-set NTA/LNMR (every _diag_every epochs + final), stored as train_diagnostics
         is_last_epoch = (epoch == int(total_epochs) - 1)
         if _diag_enabled and (epoch % _diag_every == 0 or is_last_epoch):
             _diag_y_pred = _predict_on_train_set(
@@ -513,9 +386,7 @@ def run_training(
 
         _jsonl_append(log_path, record)
 
-        # Optional epoch-end hook (e.g. for Optuna pruning). The callback
-        # sees the same record we just appended. If it raises StopTraining
-        # we exit the training loop cleanly; any other exception propagates.
+        # optional epoch-end hook (e.g. Optuna pruning); StopTraining exits the loop cleanly
         if epoch_callback is not None:
             try:
                 epoch_callback(int(epoch), record)
@@ -523,10 +394,7 @@ def run_training(
                 stopped_early = True
                 break
 
-    # Stage 2 mode: no test set, no NTA/LNMR, just return.
-    # Also short-circuit when training was stopped early via the callback —
-    # an interrupted training is not a completed one, so we don't run the
-    # final test/NTA/LNMR pass.
+    # stage 2 (no test set) or stopped early: skip final test + NTA/LNMR
     if test_loader is None or stopped_early:
         return {}
 
@@ -574,18 +442,10 @@ def run_training(
 
 
 def _method_requires_two_views(method_name: str) -> bool:
-    """Look up the ``requires_two_views`` flag on the method class without
-    instantiating the method (which needs a built cfg + device).
-
-    The mapping mirrors ``build_method`` in ``src.methods.__init__``.
-    Keeping this lookup local to the runner avoids modifying the
-    factory's signature and keeps the method classes the single source
-    of truth for the flag value.
-    """
+    """Look up requires_two_views on the method class without instantiating it."""
     from src.methods.baseline import BaselineMethod
     from src.methods.sce import SCEMethod
     from src.methods.elr import ELRMethod
-    from src.methods.asyco import AsyCoMethod
     from src.methods.asyco_divmix import AsyCoDivMixMethod
 
     name = method_name.lower()
@@ -593,7 +453,6 @@ def _method_requires_two_views(method_name: str) -> bool:
         "baseline": BaselineMethod,
         "sce": SCEMethod,
         "elr": ELRMethod,
-        "asyco": AsyCoMethod,
         "asyco_divmix": AsyCoDivMixMethod,
     }
     if name not in cls_map:

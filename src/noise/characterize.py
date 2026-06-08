@@ -1,8 +1,6 @@
-"""Noise characterization metrics.
-
-All inputs are 1D arrays of class indices (0..C-1) or class names (looked up
-via CLASS_NAMES). Outputs are row-normalized confusion matrices, concentration
-curves, TVD curves, and class distributions.
+"""
+Noise characterization metrics: row-normalized confusion matrices, concentration,
+TVD, and class distributions. Inputs are class indices or class names.
 """
 from __future__ import annotations
 
@@ -24,16 +22,7 @@ def confusion_matrix_from_labels(
     noisy: np.ndarray | list,
     normalize: str | None = "row",
 ) -> np.ndarray:
-    """Row-normalized confusion matrix M[i, j] = P(noisy=j | clean=i).
-
-    Args:
-        clean: clean labels (indices or names).
-        noisy: noisy labels (indices or names), same length.
-        normalize: "row" (default) → each row sums to 1, or None → raw counts.
-
-    Returns:
-        (C, C) matrix of float64.
-    """
+    """Confusion matrix M[i, j] = P(noisy=j | clean=i); row-normalized by default."""
     c = _to_indices(clean)
     n = _to_indices(noisy)
     if len(c) != len(n):
@@ -52,15 +41,7 @@ def confusion_matrix_from_labels(
 
 
 def concentration(confusion_row_normalized: np.ndarray) -> float:
-    """Mean over classes of the max *off-diagonal* entry per row.
-
-    Intuition: after we mask out the diagonal, how concentrated is the
-    remaining mass on a single confused class? High concentration means noise
-    is class-structured (e.g. mel ↔ nv). Low concentration means noise
-    spreads uniformly.
-
-    Rows where the diagonal is already 1.0 (no off-diagonal mass) contribute 0.
-    """
+    """Mean over rows of the max off-diagonal share (how concentrated noise is on one class)."""
     C = confusion_row_normalized.shape[0]
     vals = []
     for i in range(C):
@@ -92,9 +73,7 @@ def total_variation_distance(p: np.ndarray, q: np.ndarray) -> float:
 
 
 def off_diagonal_mae(A: np.ndarray, B: np.ndarray) -> float:
-    """Mean absolute error between two (C, C) matrices, off-diagonal entries
-    only. Used for the human annotator comparison (Stage 1e).
-    """
+    """Off-diagonal mean absolute error between two (C, C) matrices (human-comparison metric)."""
     if A.shape != B.shape:
         raise ValueError(f"shape mismatch: {A.shape} vs {B.shape}")
     C = A.shape[0]

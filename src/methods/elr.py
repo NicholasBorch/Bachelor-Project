@@ -1,23 +1,24 @@
-"""ELR: Early-Learning Regularization (Liu et al. 2020).
+"""
+ELR: Early-Learning Regularization (Liu et al. 2020).
 
-L_ELR = L_CE + lambda * mean[log(1 - <p_i, t_i>)]
+Deep nets fit clean patterns early and memorize noisy labels later; ELR keeps a
+running estimate of those early predictions and pulls the model toward it,
+resisting the later drift.
 
-The target vector t_i is a per-sample temporal moving average of softmax
-predictions:
-    t_i(k) = beta * t_i(k-1) + (1 - beta) * p_i(k)
+    L_ELR = CE + lambda * mean_i log(1 - <p_i, t_i>)
 
-CRITICAL (the ELR detach bug this entire project was built around):
-  - The inner product <p_i, t_i> in the REGULARIZATION term uses
-    probs WITH gradients (created from logits via softmax in the forward pass).
-  - The target BUFFER UPDATE uses probs_detached (we don't want gradients
-    leaking into the stored buffer across iterations).
-  - The buffer t_i itself is a plain tensor without gradients; it acts like
-    a "target" that p_i is being pulled toward.
+t_i is a per-sample EMA of the softmax prediction, held in a non-trainable
+(N, C) buffer that is zeroed per fold:
 
-If you detach BOTH sides, the regularization term becomes a gradient-free
-constant and ELR degenerates into pure CE. That is THE bug; the fix is below.
+    t_i(k) = beta * t_i(k-1) + (1 - beta) * p_i(k).
 
-Hyperparameters from CIFAR-10 settings: lambda=3.0, beta=0.7.
+<p_i, t_i> grows as the prediction aligns with the target and log(1 - .) falls,
+so the term rewards alignment; the inner product is clamped at 1 - 1e-4 to avoid
+log 0.
+
+Class weights (imbalanced arm) apply to the CE term only, matching the baseline.
+lambda, beta are tuned per protocol via Optuna; the paper's CIFAR-10 reference
+values are lambda=3.0, beta=0.7.
 """
 from __future__ import annotations
 
@@ -59,25 +60,22 @@ class ELRLoss(nn.Module):
         labels: torch.Tensor,
         indices: torch.Tensor,
     ) -> dict[str, torch.Tensor]:
-        # ----- CE term -----
+        # CE term
         ce = F.cross_entropy(logits, labels, weight=self.class_weights, reduction="mean")
 
-        # ----- Softmax WITH gradients for the regularization term -----
+        # Softmax WITH gradients for the regularization term
         probs = F.softmax(logits, dim=1)  # has gradients
 
-        # ----- Target buffer update uses detached probs -----
+        # Target buffer update uses detached probs
         with torch.no_grad():
             probs_detached = probs.detach()
-            # Update rows indicated by `indices`. Note that rare-sample indices
-            # may not appear in this batch — that's fine, their buffer rows
-            # just stay as they were.
+            # Update rows indicated by `indices`.
             self.target[indices] = (
                 self.beta * self.target[indices]
                 + (1.0 - self.beta) * probs_detached.to(self.target.dtype)
             )
 
-        # ----- Regularization term uses probs (with grads) and the current
-        # (detached-by-construction) target buffer -----
+        # regularization term: <p_i, t_i> with grads on p, against the detached target buffer
         t = self.target[indices].to(probs.dtype)  # shape (B, C), no grad
         inner = (probs * t).sum(dim=1)            # shape (B,), has grad via probs
         # Clamp for numerical stability around <p, t> ≈ 1.

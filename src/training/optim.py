@@ -39,11 +39,7 @@ def build_scheduler(
     total_epochs: int,
     name: str = "cosine_annealing",
 ) -> torch.optim.lr_scheduler.LRScheduler:
-    """Build an epoch-level LR scheduler.
-
-    Currently only CosineAnnealingLR is supported, as per the hyperparameter
-    lock in PROJECT_DOCUMENTATION.md §9.
-    """
+    """Build an epoch-level LR scheduler."""
     if name == "cosine_annealing":
         return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_epochs)
     raise ValueError(f"Unknown scheduler name: {name}")

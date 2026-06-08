@@ -1,22 +1,11 @@
-"""Feature-driven instance-dependent label noise.
+"""
+Feature-driven instance-dependent label noise.
 
-Uses out-of-fold (OOF) softmax probabilities from a clean-label ResNet-18 as
-the flip target distribution, replacing Xia et al.'s random Gaussian projection.
-
-Pipeline:
-    1. Stage 1b trains ResNet-18 on 9 folds with CLEAN labels, collects softmax
-       predictions on the held-out fold. Repeat for all 10 folds, concatenate.
-       Output: `oof_probs_full.npy` with shape (N, 7).
-    2. This module takes the clean metadata + oof_probs array + tau and flips
-       labels. For each sample i with clean class y_i:
-         - row p = oof_probs[i]                # clean-model's belief over classes
-         - mask: p[y_i] = 0
-         - renormalize so p sums to 1 over off-diagonals
-         - scale p by q_i (per-instance flip rate from truncnorm)
-         - set p[y_i] = 1 - q_i
-         - sample noisy label from p.
-
-CRITICAL: short-circuits at tau=0.0 (returns clean labels unchanged).
+Uses out-of-fold softmax probabilities from a clean-label ResNet-18 (Stage 1b) as
+the flip-target distribution, replacing Xia et al.'s random Gaussian projection.
+Per sample: zero the true-class entry of the OOF row, renormalize, scale by the
+per-instance flip rate q_i, set the true class to 1 - q_i, and sample the noisy
+label. Short-circuits at tau=0.0 (labels unchanged).
 """
 from __future__ import annotations
 
@@ -54,19 +43,7 @@ def generate_feature_driven_idn(
     seed: int,
     sigma: float = 0.1,
 ) -> tuple[pd.DataFrame, NoiseReport]:
-    """Flip labels using feature-driven IDN.
-
-    Args:
-        metadata: DataFrame with `image_id` and `dx` columns. Row order MUST
-            match the row order of oof_probs.
-        oof_probs: (N, 7) softmax probabilities from the OOF model.
-        tau: target noise rate.
-        seed: RNG seed.
-        sigma: std of the truncated normal.
-
-    Returns:
-        (noisy_df, report). See idn_xia.generate_xia_idn for df schema.
-    """
+    """Flip labels using feature-driven IDN; returns (noisy_df, NoiseReport). See idn_xia for the df schema."""
     if oof_probs.shape[0] != len(metadata):
         raise ValueError(
             f"oof_probs rows ({oof_probs.shape[0]}) must match metadata rows ({len(metadata)})"

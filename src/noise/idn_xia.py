@@ -1,19 +1,13 @@
-"""Instance-dependent label noise following Xia et al. 2020, Algorithm 2.
+"""
+Instance-dependent label noise (Xia et al. 2020, Algorithm 2).
 
-Two variants:
-    - Standard IDN  (normalize=False): ToTensor ∈ [0, 1], no channel normalization.
-    - Normalized IDN (normalize=True):  ToTensor + ImageNet channel normalization
-      before projection. Produces ~N(0, 1) pixel values, enabling genuine
-      cancellation in the dot product and reducing concentration bias.
+Two variants: standard (normalize=False; ToTensor in [0,1]) and normalized
+(normalize=True; +ImageNet normalization, giving genuine dot-product cancellation
+and less concentration bias).
 
-CRITICAL: both variants short-circuit at tau=0.0 and return the input labels
-unchanged, BITWISE IDENTICAL to the input. No sampling, no projection,
-no mutation. This is verified by tests/test_noise_tau_zero.py and must not
-regress.
-
-The output DataFrame preserves the original `dx` column renamed to `dx_clean`,
-adds a new noisy `dx` column (so all downstream code that reads `dx` gets
-noisy labels), and adds a boolean `flipped` column for later analysis.
+CRITICAL: both short-circuit at tau=0.0 and return labels bitwise identical to the
+input (verified by tests/test_noise_tau_zero.py; must not regress). Output keeps the
+original dx as dx_clean, writes noisy labels to dx, and adds a boolean flipped column.
 """
 from __future__ import annotations
 
@@ -46,13 +40,7 @@ def _sample_truncnorm_flip_rates(
     sigma: float,
     rng: np.random.Generator,
 ) -> np.ndarray:
-    """Sample n per-instance flip rates from TruncNormal(tau, sigma^2, [0, 1]).
-
-    `scipy.stats.truncnorm` takes bounds in STANDARD-NORMAL units, so we
-    reparametrize:
-        a = (0 - tau) / sigma
-        b = (1 - tau) / sigma
-    """
+    """Sample n per-instance flip rates from TruncNormal(tau, sigma^2) on [0,1]."""
     a = (0.0 - tau) / sigma
     b = (1.0 - tau) / sigma
     rvs = truncnorm.rvs(
@@ -74,10 +62,7 @@ def _load_flat_images(
     normalize: bool,
     image_size: int = 224,
 ) -> np.ndarray:
-    """Load images, apply the chosen transforms, flatten to (N, d).
-
-    d = 3 * image_size * image_size.
-    """
+    """Load images, apply the chosen transforms, and flatten to (N, 3*image_size^2)."""
     transform = get_noise_injection_transforms(image_size=image_size, normalize=normalize)
     rows = []
     for iid in image_ids:
@@ -96,24 +81,7 @@ def generate_xia_idn(
     sigma: float = 0.1,
     image_size: int = 224,
 ) -> tuple[pd.DataFrame, NoiseReport]:
-    """Apply Xia et al. 2020 Algorithm 2 instance-dependent label noise.
-
-    Args:
-        metadata: DataFrame with at least `image_id` and `dx` columns.
-        images_dir: directory containing the JPEGs.
-        tau: target noise rate. If 0.0, short-circuits and returns unchanged.
-        seed: RNG seed.
-        normalize: if True, apply ImageNet normalization before projection.
-        sigma: std of the truncated normal from which per-instance flip rates
-            are drawn.
-        image_size: images are resized to this square.
-
-    Returns:
-        (noisy_df, report). `noisy_df` has:
-            - `dx_clean`: original labels
-            - `dx`: possibly-flipped labels (the new "canonical" label column)
-            - `flipped`: bool, True if dx != dx_clean
-    """
+    """Apply Xia et al. 2020 Alg. 2 IDN; returns (noisy_df, NoiseReport). Short-circuits at tau=0."""
     # Short-circuit at tau=0: return bitwise identical data.
     if tau == 0.0:
         out = metadata.reset_index(drop=True).copy()

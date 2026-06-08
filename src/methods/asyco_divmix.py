@@ -1,96 +1,44 @@
-"""AsyCo + DivideMix MixMatch (the precise implementation the AsyCo paper
-actually uses for its experimental results, see Liu et al. 2023 §4.2).
-
-Relationship to ``asyco.py`` in this codebase
----------------------------------------------
-``asyco.py`` implements AsyCo's Eq. (5) literally: CE on clean-selected
-samples + λ * MSE(sharpen(p, T), p) self-consistency on noisy-selected
-samples. That matches the equation in the paper, but Section 4.2 says:
-
-    "For the semi-supervised training of n_θ(.), we use MixMatch [2]
-     from DivideMix [16]."
-
-i.e. the published numbers come from wrapping AsyCo's sample-selection
-inside MixMatch, not from the simple Eq. (5). This module provides that
-wrapped variant. Both methods coexist; pick at runtime via the
-``--method`` flag (``asyco`` vs ``asyco_divmix``).
-
-Pipeline (post-warmup, per training batch)
-------------------------------------------
-Inputs: two stochastic augmentations of each image — ``x1, x2`` — plus
-the noisy labels ``y_tilde`` (provided by ``TwoViewHamDataset``).
-
-1. Multi-view sample selection (no_grad) — exactly the same logic as
-   ``asyco.py``. Three label views (training label, clf argmax,
-   ref top-K) are compared on view 1 to compute:
-     w_i ∈ {+1, 0, -1}    (clean / noisy / discard)
-     ŷ_i ∈ {0,1}^C         (re-labeled multi-hot target for ref_net)
-
-2. Label construction (no_grad):
-     - ``w_i = +1`` (labeled): target = one_hot(y_tilde_i).
-       (No "co-refinement" with a per-sample blend weight; AsyCo's
-       discrete selection variable replaces DivideMix's continuous
-       GMM clean-probability.)
-     - ``w_i = 0`` (unlabeled): co-guessing — average softmax(clf_net)
-       over views x1 and x2, then temperature-sharpen.
-     - ``w_i = -1`` (discard): drop, contribute nothing.
-
-3. MixMatch:
-     all_inputs  = cat([x1_lab, x2_lab, x1_unl, x2_unl])
-     all_targets = cat([t_lab,  t_lab,  t_unl,  t_unl])
-     l = max(Beta(α, α), 1 - Beta(α, α))
-     perm = random
-     mixed_input  = l * all_inputs  + (1-l) * all_inputs[perm]
-     mixed_target = l * all_targets + (1-l) * all_targets[perm]
-     logits = clf_net(mixed_input)        # ONE forward pass with grad
-
-4. clf_net loss:
-     L_x      = -mean(sum(weighted_target * log_softmax(logits_lab))) [1]
-     L_u      = mean(sum((softmax(logits_unl) - target_unl)^2))
-     L_prior  = KL(uniform || mean_softmax(logits))
-     L_total  = L_x + ramp(λ_u, epoch) * L_u + λ_prior * L_prior
-
-   [1] Class-weighted soft CE: per-class weights from the imbalanced
-       dataset are broadcast into the soft-target log-prob product.
-       Reduces to plain softmax-CE on balanced runs (class_weights=None).
-
-5. ref_net loss: BCE on view 1 with the multi-hot ŷ from step 1
-   (identical to ``asyco.py`` — the reference net is unaffected by
-   the MixMatch wrapper).
-
-Why this is more expensive than ``asyco.py``
---------------------------------------------
-Per train_step, this method does FOUR forward passes through clf_net
-(view1 no_grad for selection, view2 no_grad for co-guessing, mixed_input
-with grad — and the mixed_input batch is up to 2× the original batch
-size because both views of every kept sample are concatenated). Plus one
-forward through ref_net (same as ``asyco.py``). Total ~2-2.5× the
-compute of ``asyco.py``. Memory peaks when the labeled+unlabeled fraction
-is large; samples in subset U (w=-1) are dropped before MixUp.
-
-Hyperparameter notes
---------------------
-- ``mixup_alpha``: DivideMix uses α=4 on CIFAR. For HAM10000 (small
-  medical dataset, fine-grained classes, less aggressive aug appropriate)
-  we default to α=0.75. Adjust per dataset.
-- ``rampup_epochs``: linear ramp of λ_u from 0 to its target value over
-  this many epochs after warmup. DivideMix uses 16. For very short
-  epoch budgets, λ_u may not reach full strength — this is by design,
-  matching DivideMix's behavior.
-- ``lambda_prior``: weight of the KL-to-uniform prior penalty. DivideMix
-  uses 1.0; we keep that default.
-
-Edge cases handled
-------------------
-- Empty labeled subset within a batch (n_lab == 0): L_x = 0, only L_u
-  and L_prior contribute. Common at warmup-exit when sample selection
-  is still noisy.
-- Empty unlabeled subset (n_unl == 0): L_u = 0, only L_x and L_prior
-  contribute. Common on clean (τ=0) data — basically reduces to plain CE.
-- Both empty: skip clf_net backward entirely; still train ref_net.
-- WeightedRandomSampler + class_weighted_loss: both flags are honored
-  exactly as in ``asyco.py``. The class weights are applied to the soft
-  CE term L_x; L_u is unweighted (matches DivideMix's design).
+"""
+AsyCo: Asymmetric Co-teaching with Multi-view Consensus (Liu et al. 2023), using
+the DivideMix MixMatch semi-supervised training of the classification net that
+the paper adopts for its reported results. 
+ 
+Two networks, both ResNet-34, differing only in head + loss:
+  - clf_net (n_theta): multi-class softmax, cross-entropy — the test-time model.
+  - ref_net (r_phi):  multi-label sigmoid, BCE — a less-overfit second opinion,
+    used only for sample selection and re-labelling.
+ 
+Per post-warmup batch (two augmented views x1, x2 per image, from
+TwoViewHamDataset):
+ 
+  1. Multi-view sample selection (no_grad). Three label views — training label,
+     clf argmax, ref top-K — yield a per-sample weight w in {+1, 0, -1}
+     (clean / noisy / discard) and a multi-hot relabel y_hat for ref_net. w=+1
+     iff the training label lies in ref_net's top-K; w=-1 (no view agreement)
+     samples are dropped before MixUp.
+  2. Targets (no_grad): clean (w=+1) -> one-hot training label; noisy (w=0) ->
+     co-guess = sharpen(mean of clf softmax over x1, x2; temperature T). This
+     discrete multi-view selection replaces DivideMix's GMM clean-probability.
+  3. MixMatch MixUp over both views of the kept samples: l ~ Beta(a, a),
+     l' = max(l, 1-l), inputs and targets blended by l'.
+  4. clf_net loss L_clf = L_x + ramp(lambda_u)*L_u + lambda_r*L_reg, where L_x is
+     (optionally class-weighted) soft-target CE on the labeled half, L_u is the
+     MSE consistency term on the unlabeled half, and L_reg is a KL-to-uniform
+     prior. lambda_u ramps linearly from 0 over rampup_epochs after warmup;
+     lambda_r is fixed.
+  5. ref_net loss: BCE on view 1 against the multi-hot y_hat from step 1.
+ 
+This is the only method that modifies the training loop and data flow directly:
+it owns both networks and their optimizers, requires two-augmentation batches
+(requires_two_views=True), and at test time evaluates with clf_net only.
+ 
+Class weights (imbalanced arm) apply to L_x only; L_u is unweighted, matching
+DivideMix. Empty labeled / unlabeled / both subsets are handled (skip the
+relevant term; if everything is discarded, only ref_net is trained).
+ 
+Tuned per protocol via Optuna: K, lambda_u, temperature, warmup_epochs. Fixed at
+DivideMix defaults and not retuned (per the paper): mixup_alpha=4.0,
+lambda_prior (lambda_r)=1.0.
 """
 from __future__ import annotations
 
@@ -126,8 +74,7 @@ def _rampup_lambda_u(
 
     Matches DivideMix's ``linear_rampup``: clamps at the target value
     once ``rampup_epochs`` post-warmup epochs have passed. Returns 0
-    during warmup itself (caller usually doesn't call this during warmup
-    anyway — defensive default).
+    during warmup itself.
     """
     if epoch < warmup_epochs:
         return 0.0
@@ -140,7 +87,7 @@ def _rampup_lambda_u(
 
 class AsyCoDivMixMethod(Method):
     """AsyCo with the full DivideMix MixMatch SSL pipeline wrapping its
-    multi-view sample selection. See module docstring for the full design.
+    multi-view sample selection.
     """
 
     requires_two_views: bool = True
@@ -155,7 +102,7 @@ class AsyCoDivMixMethod(Method):
         self.class_weights = class_weights
         m = cfg["method"]
 
-        # Multi-view consensus (same as asyco.py)
+        # Multi-view consensus
         self.K = int(m["K"])
         self.lambda_u = float(m["lambda_u"])
         self.T = float(m["temperature"])
@@ -196,7 +143,7 @@ class AsyCoDivMixMethod(Method):
                 pct=self.warmup_pct,
                 floor=self.warmup_floor,
             )
-        # Two independent models, SAME architecture as asyco.py.
+        # Two independent models
         self.clf_net = model_builder().to(self.device)
         self.ref_net = model_builder().to(self.device)
 
@@ -210,11 +157,7 @@ class AsyCoDivMixMethod(Method):
         )
         self._built = True
 
-    # ------------------------------------------------------------------
-    # Multi-view consensus — verbatim from asyco.py for parity.
-    # (Kept private to this module rather than imported, so a future edit
-    # to one method's selection logic does not silently affect the other.)
-    # ------------------------------------------------------------------
+    # multi-view consensus
     def _compute_views(
         self,
         noisy_labels: torch.Tensor,
@@ -260,9 +203,7 @@ class AsyCoDivMixMethod(Method):
         y_hat = torch.where(is_SC.unsqueeze(1), y_n_tilde, y_hat)
         return y_hat.clamp(0.0, 1.0)
 
-    # ------------------------------------------------------------------
     # Warmup loss (single view; view2 is computed but ignored).
-    # ------------------------------------------------------------------
     def _warmup_clf_loss(self, clf_logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         return F.cross_entropy(clf_logits, labels, weight=self.class_weights)
 
@@ -270,9 +211,7 @@ class AsyCoDivMixMethod(Method):
         onehot = F.one_hot(labels, num_classes=NUM_CLASSES).float()
         return F.binary_cross_entropy_with_logits(ref_logits, onehot)
 
-    # ------------------------------------------------------------------
     # Soft-target cross-entropy (with optional per-class weighting).
-    # ------------------------------------------------------------------
     def _soft_ce(
         self,
         logits: torch.Tensor,        # (N, C)
@@ -285,9 +224,7 @@ class AsyCoDivMixMethod(Method):
             log_p = log_p * self.class_weights.view(1, -1)
         return -(soft_targets * log_p).sum(dim=-1).mean()
 
-    # ------------------------------------------------------------------
     # MixMatch core (post-warmup).
-    # ------------------------------------------------------------------
     def _mixmatch_step(
         self,
         x1: torch.Tensor,                 # (B, 3, H, W)
@@ -300,7 +237,7 @@ class AsyCoDivMixMethod(Method):
         B = x1.size(0)
         components: dict[str, torch.Tensor] = {}
 
-        # ---- 1. Sample selection (no_grad) on view 1 -------------------
+        # 1. Sample selection (no_grad) on view 1
         with torch.no_grad():
             clf_logits_v1 = self.clf_net(x1)
             clf_probs_v1 = F.softmax(clf_logits_v1.float(), dim=1)
@@ -311,7 +248,7 @@ class AsyCoDivMixMethod(Method):
             w = self._compute_weights(y_tilde_oh, y_n_tilde, y_r_tilde)
             y_hat = self._compute_relabels(y_tilde_oh, y_n_tilde, y_r_tilde)
 
-        # ---- 2. ref_net BCE loss (uses the WITH-grad ref_logits) ------
+        # 2. ref_net BCE loss (uses the WITH-grad ref_logits)
         L_ref = F.binary_cross_entropy_with_logits(ref_logits_v1, y_hat)
 
         # Indicator masks
@@ -324,7 +261,7 @@ class AsyCoDivMixMethod(Method):
         components["n_noisy"] = is_unl.float().sum().detach()
         components["n_discard"] = (w == -1).float().sum().detach()
 
-        # ---- 3. Build targets ----------------------------------------
+        # 3. Build targets
         if n_lab + n_unl == 0:
             # Everything discarded — only train ref_net this batch.
             L_clf = ref_logits_v1.new_zeros(())
@@ -350,7 +287,7 @@ class AsyCoDivMixMethod(Method):
             # AsyCo's discrete w_i = +1 says "trust the noisy label fully").
             t_lab = y_tilde_oh[is_lab].to(x1.dtype) if n_lab > 0 else x1.new_zeros((0, NUM_CLASSES))
 
-        # ---- 4. Concat both views & MixUp -----------------------------
+        # 4. Concat both views & MixUp
         # Order: [x1_lab, x2_lab, x1_unl, x2_unl]
         x1_lab = x1[is_lab]
         x2_lab = x2[is_lab]
@@ -360,7 +297,7 @@ class AsyCoDivMixMethod(Method):
         all_targets = torch.cat([t_lab, t_lab, t_unl, t_unl], dim=0)
 
         # MixUp coefficient: max(λ, 1-λ) keeps the mixed sample closer to
-        # the original of the pair, matching DivideMix's convention.
+        # the original of the pair.
         if self.mixup_alpha > 0:
             l = float(np.random.beta(self.mixup_alpha, self.mixup_alpha))
             l = max(l, 1.0 - l)
@@ -370,7 +307,7 @@ class AsyCoDivMixMethod(Method):
         mixed_input = l * all_inputs + (1.0 - l) * all_inputs[perm]
         mixed_target = l * all_targets + (1.0 - l) * all_targets[perm]
 
-        # ---- 5. Forward (with grad) on the full mixed batch -----------
+        # 5. Forward (with grad) on the full mixed batch
         mixed_logits = self.clf_net(mixed_input)
         n_lab_x2 = 2 * n_lab
         logits_x = mixed_logits[:n_lab_x2]
@@ -378,7 +315,7 @@ class AsyCoDivMixMethod(Method):
         target_x_mix = mixed_target[:n_lab_x2]
         target_u_mix = mixed_target[n_lab_x2:]
 
-        # ---- 6. Losses ------------------------------------------------
+        # 6. Losses
         L_x = self._soft_ce(logits_x, target_x_mix)
         if logits_u.numel() > 0:
             p_u = F.softmax(logits_u, dim=-1)
@@ -387,7 +324,6 @@ class AsyCoDivMixMethod(Method):
             L_u = mixed_logits.new_zeros(())
 
         # KL(uniform || mean_p): encourages diverse predictions across the batch.
-        # Computed in fp32 for stability.
         with torch.amp.autocast(device_type="cuda", enabled=False):
             mean_p = F.softmax(mixed_logits.float(), dim=-1).mean(dim=0).clamp_min(1e-8)
             uniform = mean_p.new_full((NUM_CLASSES,), 1.0 / NUM_CLASSES)
@@ -408,9 +344,7 @@ class AsyCoDivMixMethod(Method):
         components["ref_bce"] = L_ref.detach()
         return L_clf, L_ref, components
 
-    # ------------------------------------------------------------------
     # Train step
-    # ------------------------------------------------------------------
     def train_step(self, batch, epoch, scaler) -> MethodOutput:
         # batch from TwoViewHamDataset = (img1, img2, label, idx)
         if len(batch) != 4:

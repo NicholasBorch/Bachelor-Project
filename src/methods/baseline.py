@@ -1,4 +1,7 @@
-"""Baseline: standard cross-entropy training."""
+"""
+Baseline: standard cross-entropy training — the reference curve every robust
+method is compared against. On the imbalanced arm CE is class-weighted.
+"""
 from __future__ import annotations
 
 import torch

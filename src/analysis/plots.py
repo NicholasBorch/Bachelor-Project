@@ -1,12 +1,9 @@
-"""Stage 4 figures.
+"""
+Stage 4 figures.
 
-All plotting uses ``matplotlib.use("Agg")`` so the functions work on HPC
-login nodes and CI without a display. Colors are assigned per method with a
-single palette that is used consistently across every figure in the thesis.
-
-Every function takes a DataFrame in the schema produced by
-:func:`~src.analysis.aggregate.load_all_results` and writes a single PNG
-file to ``output_path``. None of them modify the DataFrame in place.
+Uses matplotlib Agg so it runs headless. Every function takes a DataFrame in the
+load_all_results schema and writes one PNG to output_path without modifying the
+frame. Colors follow a single fixed per-method palette across all figures.
 """
 from __future__ import annotations
 
@@ -16,17 +13,14 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
+import matplotlib.pyplot as plt  
+import numpy as np  
+import pandas as pd 
 
-from src.data.ham10000 import CLASS_NAMES  # noqa: E402
+from src.data.ham10000 import CLASS_NAMES
 
 logger = logging.getLogger(__name__)
 
-# Locked method ordering + color palette. Baseline is the control and is
-# always drawn in grey. Robust methods use colorblind-friendly hues.
-# AsyCo+DivMix is drawn in purple so it sits visually next to AsyCo (green).
 METHOD_ORDER: list[str] = ["baseline", "sce", "elr", "asyco", "asyco_divmix"]
 METHOD_COLORS: dict[str, str] = {
     "baseline": "#555555",
@@ -43,12 +37,9 @@ METHOD_LABELS: dict[str, str] = {
     "asyco_divmix": "AsyCo+MixMatch",
 }
 
-# Metrics shown in the 4-panel "metrics vs τ" summary plot. Cohen's kappa
-# is intentionally not included (dropped per PROJECT_DOCUMENTATION §2.4).
-# The four chosen metrics mirror the thesis evaluation framework:
+# Metrics shown in the 4-panel "metrics vs τ" summary plot.
 # BA (primary), Macro F1 (co-primary), Macro AUC (supportive), NTA
-# (noise-label interaction diagnostic — see plot_noise_label_interaction
-# for the full two-panel NTA/LNMR figure).
+# (noise-label interaction diagnostic)
 METRICS_FOR_TAU_PLOT: list[tuple[str, str]] = [
     ("balanced_accuracy", "Balanced accuracy"),
     ("macro_f1", "Macro F1"),
@@ -57,11 +48,11 @@ METRICS_FOR_TAU_PLOT: list[tuple[str, str]] = [
 ]
 
 
-# ----- helpers --------------------------------------------------------------
+# helpers
 
 
 def _filter(df: pd.DataFrame, **kwargs: object) -> pd.DataFrame:
-    """Return rows where all key=value kwargs match, dropping NaN rows."""
+    """Return rows where all key=value kwargs match."""
     mask = pd.Series(True, index=df.index)
     for k, v in kwargs.items():
         mask &= df[k] == v
@@ -86,7 +77,7 @@ def _save(fig: plt.Figure, output_path: Path) -> None:
     logger.info("Wrote %s", output_path)
 
 
-# ----- per-condition plots --------------------------------------------------
+# per-condition plots
 
 
 def plot_metrics_vs_tau(
@@ -146,27 +137,7 @@ def plot_noise_label_interaction(
     optim: str,
     output_path: Path,
 ) -> None:
-    """Two-panel figure of NTA (top) and LNMR (bottom) vs τ per method.
-
-    This is the primary figure for the noise-label interaction section of
-    the thesis (see PROJECT_DOCUMENTATION §2.4). Both metrics are computed
-    on the flipped subset of training samples and so are undefined at
-    τ=0 — the τ=0 point is silently skipped.
-
-    Intuition:
-
-        - High NTA at a given τ: the method successfully recovered the
-          true class despite corrupted supervision.
-        - High LNMR at a given τ: the method memorized the noisy labels
-          (the classic failure mode of CE under noise).
-        - NTA + LNMR ≤ 1; any remaining mass corresponds to predictions
-          that match neither the clean nor the noisy label.
-
-    Args:
-        df: Tidy results DataFrame (must contain ``nta`` and ``lnmr``).
-        dataset, init, optim: Filter axes.
-        output_path: PNG output path.
-    """
+    """Two-panel NTA (top) and LNMR (bottom) vs tau per method; tau=0 is skipped (undefined)."""
     sub = _filter(df, dataset=dataset, init=init, optim=optim)
     if sub.empty or "nta" not in sub.columns or "lnmr" not in sub.columns:
         logger.warning(
@@ -316,7 +287,7 @@ def plot_per_class_f1_heatmap(
     _save(fig, output_path)
 
 
-# ----- cross-condition plots ------------------------------------------------
+# cross-condition plots
 
 
 def plot_init_optim_ablation(

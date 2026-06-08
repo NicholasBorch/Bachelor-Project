@@ -1,12 +1,9 @@
-"""Stratified 10-fold CV assignments.
-
-Fold assignments are created ONCE per dataset in Stage 1a and consumed by every
-downstream stage. This guarantees that fold N's test set is identical across
-all noise types, τ values, methods, and training conditions.
-
-Note on patient leakage: Stage 0 enforces one-image-per-lesion deduplication,
-so every image_id in the processed metadata corresponds to a unique lesion.
-Standard StratifiedKFold on the deduplicated data is therefore leak-safe.
+"""
+Stratified 10-fold CV assignments.
+ 
+Created once in Stage 1a and consumed by every downstream stage, so fold N's test
+set is identical across all noise types, taus, methods, and conditions. Stage 0
+dedups to one image per lesion, so plain StratifiedKFold is leak-safe.
 """
 from __future__ import annotations
 

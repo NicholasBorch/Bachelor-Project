@@ -1,17 +1,10 @@
-"""TwoViewHamDataset — returns two stochastic augmentations per image.
+"""
+TwoViewHamDataset: returns two stochastic augmentations per image.
 
-Required by MixMatch / DivideMix-style training, where label co-guessing
-averages predictions over two augmented views and MixUp blends across
-labeled and unlabeled samples regardless of view.
-
-This wrapper is constructed AFTER the base ``HamDataset`` so the in-memory
-PIL cache is shared; we only re-apply the (stochastic) train transform a
-second time. Cost is one extra augmentation pipeline per ``__getitem__``,
-no extra image I/O.
-
-Currently used only by ``AsyCoDivMixMethod``. Other methods do not opt in
-(via ``Method.requires_two_views = False``) and continue to receive
-single-view batches from the standard ``HamDataset``.
+Required by MixMatch/DivideMix-style training (AsyCoDivMix). Wraps a built
+HamDataset so the PIL cache is shared and only the train transform is re-applied a
+second time (no extra image I/O). Other methods set requires_two_views = False and
+keep single-view batches.
 """
 from __future__ import annotations
 
@@ -24,17 +17,7 @@ from src.data.ham10000 import HamDataset
 
 
 class TwoViewHamDataset(Dataset):
-    """Wraps ``HamDataset`` to return ``(img1, img2, label, idx)`` per item.
-
-    Both views come from independent invocations of the same stochastic
-    ``transform`` callable applied to the same source PIL image (which is
-    held in the wrapped dataset's in-memory cache, so there is no extra
-    file I/O).
-
-    The returned ``idx`` is the same row index used by the wrapped
-    dataset, preserving compatibility with ELR-style index-keyed buffers
-    if they are ever combined with two-view training in the future.
-    """
+    """Wraps HamDataset to return (img1, img2, label, idx); both views from the same cached PIL."""
 
     def __init__(self, base: HamDataset, transform: Callable):
         if not isinstance(base, HamDataset):
