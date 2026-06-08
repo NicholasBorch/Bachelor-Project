@@ -1,25 +1,11 @@
 #!/bin/bash
 # hpc/submit_stage1b.sh
 #
-# Submit OOF probability collection jobs, one per (dataset, fold).
-# 2 datasets × 10 folds = 20 jobs total.
-#
-# Each job trains ResNet-18 for 30 epochs with Adam(lr=1e-4) on the
-# clean training folds and runs inference on the held-out fold.
-# Locked protocol — see PROJECT_DOCUMENTATION.md §6 Stage 1b / §9.
-#
-# Prerequisite: Stage 1a (fold assignments) has been run locally.
-#
-# Usage:
-#   bash hpc/submit_stage1b.sh
-#
-# LSF site settings align with hpc/lsf_defaults.yaml and the DTU HPC guide.
-# Edit lsf_defaults.yaml first if you move clusters.
-#
-# Walltime rationale (30 epochs, ResNet-18, ~2× faster than ResNet-34):
-#   - Balanced (~460 train samples):   ~4-6 min per job
-#   - Imbalanced (~6,700 train samples): ~50-60 min per job
-#   With 3:00 walltime -> ~120 min safety margin on imbalanced jobs.
+# Submit OOF probability collection jobs, one per (dataset, fold): 2 x 10 = 20.
+# Each trains ResNet-18 for 30 epochs with Adam(lr=1e-4) on the clean training
+# folds and runs inference on the held-out fold (locked protocol). Requires
+# Stage 1a (fold assignments) run locally. Site settings align with
+# hpc/lsf_defaults.yaml.
 
 set -euo pipefail
 

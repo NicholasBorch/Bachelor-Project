@@ -1,28 +1,9 @@
 #!/bin/bash
 # hpc/submit_stage1c.sh
 #
-# Submit noise injection jobs. Feature-driven IDN is the only noise type
-# used downstream by Stage 3 (see PROJECT_DOCUMENTATION.md §2.1); standard
-# and normalized IDN are generated for noise characterization only
-# (Stage 1d/1e).
-#
-# Grid: 2 datasets × 3 noise types × 10 folds = 60 jobs.
+# Submit noise injection jobs: 2 datasets x 3 noise types x 10 folds = 60.
 # Each job processes all 6 tau values for one (dataset, noise_type, fold).
-#
-# This stage is fast (minutes per job) and CPU-bound. If you prefer, you
-# can skip submission and run all folds locally on the login node with:
-#
-#   for d in balanced imbalanced; do
-#     for n in standard normalized feature_driven; do
-#       python -m scripts.stage1c_inject_noise --dataset $d --noise-type $n --all-folds
-#     done
-#   done
-#
-# Queue `hpc` is DTU's general CPU queue. Memory per core follows the
-# same DTU convention as the GPU jobs.
-#
-# Usage:
-#   bash hpc/submit_stage1c.sh
+# Fast and CPU-bound (queue `hpc`); can also be run locally on the login node.
 
 set -euo pipefail
 

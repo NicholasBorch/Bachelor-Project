@@ -1,52 +1,23 @@
-# LSF site defaults for the bachelor thesis HPC campaign on the DTU cluster.
-#
-# This file lives beside the submit scripts so queue names, walltime caps,
-# and memory reservations are tuned in one place. generate_stage3_jobs.py
-# reads this file; the submit_stageXX.sh templates mirror the same values.
-#
-# Site: DTU HPC LSF cluster. V100 GPUs (32 GB VRAM) via the gpuv100 queue.
-# See docs/HPC_SETUP.md for the full DTU-specific setup and workflow.
+# LSF site defaults for the thesis HPC campaign (DTU cluster). Queue names,
+# walltime caps, and memory reservations live here in one place; the
+# submit_stageXX.sh scripts mirror these values. DTU HPC, V100 (32 GB) via
+# the gpuv100 queue. See docs/HPC_SETUP.md for the full setup.
 
 queue: gpuv100
 walltime: "24:00"            # bsub -W format: HH:MM (Stage 3 fallback)
 
-# CPU core allocation. DTU convention: per-core memory in MB.
-# 8 cores × 4000 MB = 32 GB total reservation, well above the ~9 GB peak
-# observed for ResNet-34 training on HAM10000 (DTU HPC guide §4).
-# Do NOT over-request memory — it hurts queue priority without helping.
+# CPU cores + per-core memory (MB); ~32 GB total, well above the ResNet-34 peak.
 cpu_cores: 8
 memory_per_core_mb: 4000
 gpu_spec: "num=1:mode=exclusive_process"
 
-# ─── Walltime budgets for lighter stages ──────────────────────────────────
-#
-# Sized for worst-case at 100 epochs on ResNet-34, with generous safety
-# margin so no job dies mid-training and wastes the fold.
-#
-# DTU-observed baselines (ResNet-50, 25 epochs, imbalanced — from the HPC
-# guide). ResNet-34 is ~1.5× faster; ResNet-18 ~2× faster than ResNet-34:
-#   - baseline/SCE/ELR @ 25 ep, ResNet-50, imbalanced:  ~140 min
-#   - AsyCo             @ 25 ep, ResNet-50, imbalanced:  ~349 min
-#   - AsyCo+DivMix      @ 25 ep, ResNet-50, imbalanced:  ~700 min (extrapolated;
-#       MixMatch adds ~2× the per-step cost over plain AsyCo)
-#
-# Stage 1b: ResNet-18, 30 epochs, locked protocol. Imbalanced ≈ 56 min,
-#           balanced ≈ 4 min. 3:00 gives 2h margin on imbalanced.
-#
-# Stage 1c: CPU-only noise injection. Seconds to minutes. 1:00 is massive
-#           margin.
-#
-# Stage 2: Up to 100 epochs on clean data. Per-(dataset,method) walltimes
-#          set inline in submit_stage2.sh because they vary widely.
-#
-# Stage 3: Uses the per-method walltimes below (falls back to `walltime`).
+# Walltime budgets for lighter stages (sized for worst case at 100 epochs,
+# generous margin). Stage 3 falls back to `walltime` above.
 
 stage1b_walltime: "3:00"     # OOF probability collection (ResNet-18, 30 epochs, Adam)
 stage1c_walltime: "1:00"     # Noise injection (CPU; minutes real)
 
-# Per-method Stage 3 walltimes. generate_stage3_jobs.py reads these and
-# assigns a method-specific -W per job. Non-AsyCo at 100 epochs imbalanced
-# is ~6.2h; AsyCo imbalanced is ~15.5h; AsyCo+DivMix hits the 24h cap.
+# Per-method Stage 3 walltimes (HH:MM; falls back to walltime above).
 stage3_walltime_by_method:
   baseline:      "12:00"     # ~6.2h worst case, ~5.8h margin
   sce:           "12:00"
