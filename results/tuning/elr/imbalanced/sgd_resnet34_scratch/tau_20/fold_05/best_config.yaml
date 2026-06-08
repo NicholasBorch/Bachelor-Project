@@ -1,0 +1,11 @@
+# Hyperparameters chosen by FINAL Optuna search.
+# See /zhome/c5/0/205916/projects/Bachelor-Project/results/optuna_final/elr/imbalanced/sgd_resnet34_scratch/tau_20/fold_05/summary.txt for the search summary.
+name: elr
+lambda: 0.5137790507021264
+beta: 0.743432353948235
+_optuna_provenance:
+  protocol: FINAL
+  study_name: elr_fold05_FINAL
+  best_trial_number: 22
+  best_value: 0.5900610842475714
+  n_trials_completed: 100

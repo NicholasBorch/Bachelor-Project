@@ -1,0 +1,2 @@
+src,tgt,n_folds,confidence_mean,confidence_ci_lo,confidence_ci_hi,abs_target_mean,abs_target_ci_lo,abs_target_ci_hi,argmax_target_mean,argmax_target_ci_lo,argmax_target_ci_hi,renorm_target_mean,renorm_target_ci_lo,renorm_target_ci_hi
+nv,mel,10,0.5986650956414148,0.590370735059177,0.608292460773886,0.2328536940722678,0.22228707622780752,0.24487716200469817,0.24153351133018414,0.23009960977613475,0.25546969774765527,0.5393422271740876,0.5207537672007696,0.5570652939233363

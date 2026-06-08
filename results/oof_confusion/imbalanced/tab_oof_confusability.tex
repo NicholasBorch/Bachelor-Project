@@ -1,0 +1,18 @@
+\begin{table}[h!]
+\centering
+\begin{tabular}{lccc}
+\toprule
+True class & OOF conf.\ $\overline{P(\text{true})}$ & Top confusion target & $\overline{P(\text{target})}$ \\
+\midrule
+nv & 0.599 & mel & 0.233 \\
+bkl & 0.652 & mel & 0.155 \\
+mel & 0.710 & bkl & 0.120 \\
+bcc & 0.844 & akiec & 0.078 \\
+akiec & 0.703 & bkl & 0.103 \\
+vasc & 0.915 & bcc & 0.037 \\
+df & 0.688 & bcc & 0.094 \\
+\bottomrule
+\end{tabular}
+\caption{Out-of-fold ResNet-18 confusability per true class, computed from the un-masked OOF softmax that the Feature-Driven noise model is built on. $\overline{P(\text{true})}$ is the mean softmax probability the OOF model assigns to the true class (its confidence); the dominant confusion target is the off-diagonal class with the highest mean probability, reported with that absolute (un-masked) mean probability $\overline{P(\text{target})}$. Because these are absolute probabilities, a non-trivial $\overline{P(\text{target})}$ is direct evidence of genuine visual confusability, independent of the masking and renormalisation used to build the flip targets.}
+\label{tab:oof-confusability}
+\end{table}

@@ -1,0 +1,46 @@
+% Preamble: \usepackage{booktabs,makecell,multirow,graphicx,longtable,amsmath,pdflscape}
+
+\begin{small}
+\setlength{\LTcapwidth}{\textwidth}
+\begin{longtable}{llcccc}
+\caption{Complete macro f1 grid across training protocols. Cells give the fold mean with the 95\% bootstrap confidence interval below. Stars mark the Holm-corrected method-vs-own-protocol-baseline result; the best included method per protocol and $\tau$ is in bold.}\label{tab:app-protocol-full-macrof1}\\
+\toprule
+$\tau$ & Method & SGD / scratch & SGD / pretrained & Adam / scratch & Adam / pretrained \\
+\midrule
+\endfirsthead
+\toprule
+$\tau$ & Method & SGD / scratch & SGD / pretrained & Adam / scratch & Adam / pretrained \\
+\midrule
+\endhead
+0.0 & Baseline & \makecell{$0.433$\\{\scriptsize $(0.418,\,0.449)$}} & \makecell{$0.549$\\{\scriptsize $(0.521,\,0.577)$}} & \makecell{$0.439$\\{\scriptsize $(0.426,\,0.452)$}} & \makecell{$0.568$\\{\scriptsize $(0.546,\,0.589)$}} \\
+ & SCE & \makecell{$\mathbf{0.574}^{+*}$\\{\scriptsize $(0.555,\,0.596)$}} & \makecell{$\mathbf{0.717}^{+*}$\\{\scriptsize $(0.697,\,0.734)$}} & \makecell{$\mathbf{0.570}^{+*}$\\{\scriptsize $(0.552,\,0.587)$}} & \makecell{$\mathbf{0.672}^{+*}$\\{\scriptsize $(0.655,\,0.690)$}} \\
+ & ELR & \makecell{$0.308^{-*}$\\{\scriptsize $(0.286,\,0.329)$}} & \makecell{$0.431^{-*}$\\{\scriptsize $(0.416,\,0.444)$}} & \makecell{$0.313^{-*}$\\{\scriptsize $(0.298,\,0.327)$}} & \makecell{$0.417^{-*}$\\{\scriptsize $(0.392,\,0.449)$}} \\
+ & AsyCo & \makecell{$0.252^{-*}$\\{\scriptsize $(0.230,\,0.275)$}} & \makecell{$0.435^{-*}$\\{\scriptsize $(0.400,\,0.465)$}} & \makecell{$0.272^{-*}$\\{\scriptsize $(0.259,\,0.285)$}} & \makecell{$0.435^{-*}$\\{\scriptsize $(0.417,\,0.451)$}} \\
+\addlinespace
+0.1 & Baseline & \makecell{$0.205$\\{\scriptsize $(0.197,\,0.213)$}} & \makecell{$0.287$\\{\scriptsize $(0.272,\,0.302)$}} & \makecell{$0.197$\\{\scriptsize $(0.185,\,0.209)$}} & \makecell{$0.255$\\{\scriptsize $(0.245,\,0.266)$}} \\
+ & SCE & \makecell{$\mathbf{0.410}^{+*}$\\{\scriptsize $(0.392,\,0.428)$}} & \makecell{$\mathbf{0.590}^{+*}$\\{\scriptsize $(0.564,\,0.613)$}} & \makecell{$\mathbf{0.365}^{+*}$\\{\scriptsize $(0.349,\,0.384)$}} & \makecell{$\mathbf{0.501}^{+*}$\\{\scriptsize $(0.486,\,0.518)$}} \\
+ & ELR & \makecell{$0.205$\\{\scriptsize $(0.193,\,0.218)$}} & \makecell{$0.275$\\{\scriptsize $(0.261,\,0.288)$}} & \makecell{$0.201$\\{\scriptsize $(0.187,\,0.216)$}} & \makecell{$0.250$\\{\scriptsize $(0.241,\,0.258)$}} \\
+ & AsyCo & \makecell{$0.184$\\{\scriptsize $(0.173,\,0.197)$}} & \makecell{$0.256$\\{\scriptsize $(0.236,\,0.275)$}} & \makecell{$0.183$\\{\scriptsize $(0.169,\,0.199)$}} & \makecell{$0.287^{+*}$\\{\scriptsize $(0.273,\,0.299)$}} \\
+\addlinespace
+0.2 & Baseline & \makecell{$0.184$\\{\scriptsize $(0.175,\,0.193)$}} & \makecell{$0.268$\\{\scriptsize $(0.255,\,0.279)$}} & \makecell{$0.183$\\{\scriptsize $(0.175,\,0.191)$}} & \makecell{$0.237$\\{\scriptsize $(0.227,\,0.248)$}} \\
+ & SCE & \makecell{$\mathbf{0.359}^{+*}$\\{\scriptsize $(0.355,\,0.364)$}} & \makecell{$\mathbf{0.516}^{+*}$\\{\scriptsize $(0.498,\,0.534)$}} & \makecell{$\mathbf{0.315}^{+*}$\\{\scriptsize $(0.305,\,0.324)$}} & \makecell{$\mathbf{0.416}^{+*}$\\{\scriptsize $(0.403,\,0.431)$}} \\
+ & ELR & \makecell{$0.192$\\{\scriptsize $(0.182,\,0.202)$}} & \makecell{$0.256$\\{\scriptsize $(0.249,\,0.264)$}} & \makecell{$0.178$\\{\scriptsize $(0.171,\,0.185)$}} & \makecell{$0.242$\\{\scriptsize $(0.232,\,0.251)$}} \\
+ & AsyCo & \makecell{$0.167$\\{\scriptsize $(0.157,\,0.178)$}} & \makecell{$0.224^{-*}$\\{\scriptsize $(0.207,\,0.237)$}} & \makecell{$0.172$\\{\scriptsize $(0.159,\,0.185)$}} & \makecell{$0.258$\\{\scriptsize $(0.245,\,0.272)$}} \\
+\addlinespace
+0.3 & Baseline & \makecell{$0.174$\\{\scriptsize $(0.165,\,0.183)$}} & \makecell{$0.241$\\{\scriptsize $(0.230,\,0.251)$}} & \makecell{$0.162$\\{\scriptsize $(0.151,\,0.173)$}} & \makecell{$0.206$\\{\scriptsize $(0.198,\,0.214)$}} \\
+ & SCE & \makecell{$\mathbf{0.297}^{+*}$\\{\scriptsize $(0.285,\,0.309)$}} & \makecell{$\mathbf{0.434}^{+*}$\\{\scriptsize $(0.408,\,0.456)$}} & \makecell{$\mathbf{0.262}^{+*}$\\{\scriptsize $(0.251,\,0.273)$}} & \makecell{$\mathbf{0.345}^{+*}$\\{\scriptsize $(0.334,\,0.355)$}} \\
+ & ELR & \makecell{$0.170$\\{\scriptsize $(0.161,\,0.180)$}} & \makecell{$0.231$\\{\scriptsize $(0.217,\,0.243)$}} & \makecell{$0.159$\\{\scriptsize $(0.150,\,0.171)$}} & \makecell{$0.208$\\{\scriptsize $(0.199,\,0.217)$}} \\
+ & AsyCo & \makecell{$0.145^{-*}$\\{\scriptsize $(0.131,\,0.158)$}} & \makecell{$0.191^{-*}$\\{\scriptsize $(0.183,\,0.200)$}} & \makecell{$0.137^{-*}$\\{\scriptsize $(0.127,\,0.148)$}} & \makecell{$0.225$\\{\scriptsize $(0.215,\,0.235)$}} \\
+\addlinespace
+0.4 & Baseline & \makecell{$0.153$\\{\scriptsize $(0.144,\,0.161)$}} & \makecell{$0.218$\\{\scriptsize $(0.206,\,0.227)$}} & \makecell{$0.142$\\{\scriptsize $(0.134,\,0.150)$}} & \makecell{$0.188$\\{\scriptsize $(0.183,\,0.194)$}} \\
+ & SCE & \makecell{$\mathbf{0.241}^{+*}$\\{\scriptsize $(0.231,\,0.251)$}} & \makecell{$\mathbf{0.380}^{+*}$\\{\scriptsize $(0.367,\,0.395)$}} & \makecell{$\mathbf{0.186}^{+*}$\\{\scriptsize $(0.178,\,0.193)$}} & \makecell{$\mathbf{0.277}^{+*}$\\{\scriptsize $(0.264,\,0.291)$}} \\
+ & ELR & \makecell{$0.142$\\{\scriptsize $(0.137,\,0.148)$}} & \makecell{$0.196$\\{\scriptsize $(0.184,\,0.207)$}} & \makecell{$0.133^{-*}$\\{\scriptsize $(0.126,\,0.141)$}} & \makecell{$0.181$\\{\scriptsize $(0.176,\,0.186)$}} \\
+ & AsyCo & \makecell{$0.153$\\{\scriptsize $(0.131,\,0.178)$}} & \makecell{$0.219$\\{\scriptsize $(0.196,\,0.241)$}} & \makecell{$0.132$\\{\scriptsize $(0.114,\,0.151)$}} & \makecell{$0.208$\\{\scriptsize $(0.189,\,0.226)$}} \\
+\addlinespace
+0.5 & Baseline & \makecell{$0.134$\\{\scriptsize $(0.125,\,0.143)$}} & \makecell{$0.211$\\{\scriptsize $(0.202,\,0.220)$}} & \makecell{$0.128$\\{\scriptsize $(0.119,\,0.138)$}} & \makecell{$0.170$\\{\scriptsize $(0.160,\,0.178)$}} \\
+ & SCE & \makecell{$\mathbf{0.200}^{+*}$\\{\scriptsize $(0.191,\,0.210)$}} & \makecell{$\mathbf{0.325}^{+*}$\\{\scriptsize $(0.315,\,0.335)$}} & \makecell{$\mathbf{0.167}^{+*}$\\{\scriptsize $(0.159,\,0.176)$}} & \makecell{$\mathbf{0.233}^{+*}$\\{\scriptsize $(0.225,\,0.243)$}} \\
+ & ELR & \makecell{$0.127$\\{\scriptsize $(0.116,\,0.141)$}} & \makecell{$0.188^{-*}$\\{\scriptsize $(0.178,\,0.198)$}} & \makecell{$0.115$\\{\scriptsize $(0.105,\,0.125)$}} & \makecell{$0.161$\\{\scriptsize $(0.155,\,0.167)$}} \\
+ & AsyCo & \makecell{$0.124$\\{\scriptsize $(0.110,\,0.137)$}} & \makecell{$0.178$\\{\scriptsize $(0.158,\,0.199)$}} & \makecell{$0.112$\\{\scriptsize $(0.104,\,0.120)$}} & \makecell{$0.192$\\{\scriptsize $(0.178,\,0.206)$}} \\
+\bottomrule
+\end{longtable}
+\end{small}

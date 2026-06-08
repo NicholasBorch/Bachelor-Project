@@ -1,0 +1,29 @@
+{
+  "stage": "stage4_rq1_human_confusion",
+  "timestamp_utc": "2026-06-08T00:10:58.964533+00:00",
+  "git_commit": "0f7defc",
+  "hostname": "nicholass-mbp-3.students.clients.local",
+  "python": "3.11.7",
+  "params": {
+    "dataset": "imbalanced",
+    "noise_types": [
+      "feature_driven",
+      "normalized"
+    ],
+    "metric": "off_diagonal_MAE_and_per_row_cosine_flip_only_vs_tschandl_all_readers",
+    "test": "paired_wilcoxon+permutation+bootstrapCI_fd_vs_norm_per_tau_holm_on_mae_and_cosine",
+    "n_bootstrap": 10000,
+    "representative_tau": 0.2
+  },
+  "outputs": [
+    "results/rq1_human_confusion/imbalanced/per_fold_mae.csv",
+    "results/rq1_human_confusion/imbalanced/mae_summary.csv",
+    "results/rq1_human_confusion/imbalanced/paired_tests.csv",
+    "results/rq1_human_confusion/imbalanced/paired_tests_cosine.csv",
+    "results/rq1_human_confusion/imbalanced/mae_vs_tau.png",
+    "results/rq1_human_confusion/imbalanced/confusion_triplet_tau20.png",
+    "results/rq1_human_confusion/imbalanced/confusion_triplet_tau20_human.png",
+    "results/rq1_human_confusion/imbalanced/confusion_triplet_tau20_normalized.png",
+    "results/rq1_human_confusion/imbalanced/confusion_triplet_tau20_feature_driven.png"
+  ]
+}

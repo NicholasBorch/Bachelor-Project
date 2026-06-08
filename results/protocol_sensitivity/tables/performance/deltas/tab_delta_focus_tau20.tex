@@ -1,0 +1,25 @@
+% Preamble: \usepackage{booktabs,makecell,multirow,graphicx,longtable,amsmath,pdflscape}
+
+\begin{table}[htbp]
+\centering
+\caption{Difference to each training protocol's own baseline at $\tau=0.20$. Cells give the absolute change in metric units with the relative change in parentheses. These are descriptive magnitudes; paired within-protocol significance is reported in the protocol score tables.}
+\label{tab:protocol-delta-focus}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llcccc}
+\toprule
+Metric & Method & SGD / scratch & SGD / pretrained & Adam / scratch & Adam / pretrained \\
+\midrule
+Balanced accuracy & SCE & +0.102 (+19.5\%) & +0.087 (+14.4\%) & +0.078 (+15.1\%) & +0.066 (+10.9\%) \\
+ & ELR & +0.012 (+2.3\%) & +0.003 (+0.4\%) & -0.025 (-4.8\%) & +0.008 (+1.3\%) \\
+ & AsyCo & -0.080 (-15.3\%) & -0.052 (-8.6\%) & -0.056 (-10.7\%) & -0.039 (-6.5\%) \\
+\addlinespace
+Macro F1 & SCE & +0.175 (+94.8\%) & +0.248 (+92.5\%) & +0.131 (+71.6\%) & +0.179 (+75.3\%) \\
+ & ELR & +0.008 (+4.1\%) & -0.012 (-4.5\%) & -0.006 (-3.2\%) & +0.004 (+1.9\%) \\
+ & AsyCo & -0.017 (-9.3\%) & -0.044 (-16.4\%) & -0.012 (-6.4\%) & +0.021 (+8.8\%) \\
+\addlinespace
+Macro AUC & SCE & +0.042 (+5.1\%) & +0.037 (+4.2\%) & +0.039 (+4.7\%) & +0.028 (+3.2\%) \\
+ & ELR & -0.003 (-0.3\%) & -0.026 (-2.9\%) & -0.009 (-1.0\%) & -0.016 (-1.9\%) \\
+ & AsyCo & -0.009 (-1.1\%) & -0.015 (-1.7\%) & +0.015 (+1.8\%) & -0.009 (-1.1\%) \\
+\bottomrule
+\end{tabular}}
+\end{table}

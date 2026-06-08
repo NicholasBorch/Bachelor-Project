@@ -1,0 +1,18 @@
+# Hyperparameters chosen by FINAL Optuna search.
+# See /zhome/44/6/204879/projects/Bachelor-Project/results/optuna_final/asyco_divmix/imbalanced/adam_resnet34_scratch/tau_20/fold_05/summary.txt for the search summary.
+name: asyco_divmix
+K: 4
+lambda_u: 1.6069864142645618
+temperature: 0.7452846309990724
+warmup_epochs_pct: 0.05
+warmup_epochs_floor: 5
+mixup_alpha: 4.0
+rampup_epochs: 16
+lambda_prior: 1.0
+warmup_epochs: 25
+_optuna_provenance:
+  protocol: FINAL
+  study_name: asyco_divmix_fold05_FINAL
+  best_trial_number: 98
+  best_value: 0.5270420032746642
+  n_trials_completed: 100

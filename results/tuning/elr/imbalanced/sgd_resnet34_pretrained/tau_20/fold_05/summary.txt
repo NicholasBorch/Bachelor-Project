@@ -1,0 +1,20 @@
+Study: elr_fold05_FINAL
+Direction: MAXIMIZE
+Total trials: 100
+  Completed: 100
+  Failed:    0
+  Pruned:    0
+
+Best value: 0.653458
+Best trial number: 33
+Best params:
+  lambda: 0.9340482221211514
+  beta: 0.5373596334919839
+
+Top 5 trials:
+       trial       value      lambda        beta
+          33      0.6535       0.934      0.5374
+          41      0.6472      0.9546      0.5828
+          18      0.6453      0.7511      0.5033
+          17      0.6428      0.5173       0.554
+          37      0.6427      0.5499      0.5861

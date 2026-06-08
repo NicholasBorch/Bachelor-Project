@@ -1,0 +1,17 @@
+% Preamble: \usepackage{booktabs,multirow,graphicx,longtable}
+\begin{table}[h!]
+\centering
+\begin{tabular}{lccccc}
+\toprule
+Protocol & Warm-up & Labeled & Unlabeled & Discarded & $1-\tau$ \\
+ & (epochs) & (\%) & (\%) & (\%) & (\%) \\
+\midrule
+SGD / scratch & 23 & 91.7 & 8.3 & 0.0 & 80.0 \\
+SGD / pretrained & 10 & 97.3 & 2.7 & 0.0 & 80.0 \\
+Adam / scratch & 25 & 84.9 & 15.1 & 0.0 & 80.0 \\
+Adam / pretrained & 24 & 96.5 & 3.5 & 0.0 & 80.0 \\
+\bottomrule
+\end{tabular}
+\caption{AsyCo co-divide label partition at $\tau=0.20$, by training protocol. Each cell is the mean over the final 10 epochs and ten folds. \emph{Labeled} is the set AsyCo trains on as clean, \emph{Unlabeled} the pseudo-labeled set and \emph{Discarded} the dropped fraction; warm-up is the median epoch at which the partition first activates. The final column is the labeled fraction a perfectly selective filter would retain.}
+\label{tab:mech-asyco-selection}
+\end{table}

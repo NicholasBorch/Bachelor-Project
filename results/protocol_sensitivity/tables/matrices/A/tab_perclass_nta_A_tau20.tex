@@ -1,0 +1,18 @@
+% Preamble: \usepackage{booktabs,makecell,multirow,graphicx,longtable,amsmath,pdflscape}
+
+\begin{table}[htbp]
+\centering
+\caption{Per-class NTA for protocol A at $\tau=0.20$. Values are fold-averaged descriptive diagnostics.}
+\label{tab:perclass_nta-a-tau20}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lccccccc}
+\toprule
+Method & nv & bkl & mel & bcc & akiec & vasc & df \\
+\midrule
+Baseline & 0.000 & 0.218 & 0.358 & 0.508 & 0.607 & 0.508 & 0.642 \\
+SCE & 0.273 & 0.343 & 0.490 & 0.496 & 0.532 & 0.576 & 0.627 \\
+ELR & 0.000 & 0.163 & 0.377 & 0.466 & 0.647 & 0.537 & 0.714 \\
+AsyCo & 0.024 & 0.083 & 0.355 & 0.332 & 0.794 & 0.931 & 0.683 \\
+\bottomrule
+\end{tabular}}
+\end{table}

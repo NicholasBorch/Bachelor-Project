@@ -1,0 +1,19 @@
+\begin{table}[h!]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l*{4}{c}*{4}{c}}
+\toprule
+ & \multicolumn{4}{c}{NTA (recovered to true)} & \multicolumn{4}{c}{LNMR (memorized noisy)} \\
+\cmidrule(lr){2-5}\cmidrule(lr){6-9}
+$\tau$ & Baseline & SCE & ELR & AsyCo & Baseline & SCE & ELR & AsyCo \\
+\midrule
+0.1 & \makecell{$0.119$\\{\scriptsize $(0.114,\,0.125)$}} & \makecell{$\mathbf{0.456}$\\{\scriptsize $(0.440,\,0.470)$}} & \makecell{$0.119$\\{\scriptsize $(0.114,\,0.124)$}} & \makecell{$0.232$\\{\scriptsize $(0.204,\,0.257)$}} & \makecell{$0.693$\\{\scriptsize $(0.674,\,0.711)$}} & \makecell{$0.474$\\{\scriptsize $(0.460,\,0.490)$}} & \makecell{$0.668$\\{\scriptsize $(0.639,\,0.692)$}} & \makecell{$\mathbf{0.312}$\\{\scriptsize $(0.296,\,0.326)$}} \\
+0.2 & \makecell{$0.116$\\{\scriptsize $(0.111,\,0.121)$}} & \makecell{$\mathbf{0.387}$\\{\scriptsize $(0.372,\,0.403)$}} & \makecell{$0.120$\\{\scriptsize $(0.116,\,0.123)$}} & \makecell{$0.209$\\{\scriptsize $(0.192,\,0.228)$}} & \makecell{$0.663$\\{\scriptsize $(0.647,\,0.678)$}} & \makecell{$0.502$\\{\scriptsize $(0.489,\,0.516)$}} & \makecell{$0.647$\\{\scriptsize $(0.632,\,0.661)$}} & \makecell{$\mathbf{0.322}$\\{\scriptsize $(0.305,\,0.339)$}} \\
+0.3 & \makecell{$0.109$\\{\scriptsize $(0.107,\,0.112)$}} & \makecell{$\mathbf{0.326}$\\{\scriptsize $(0.311,\,0.343)$}} & \makecell{$0.108$\\{\scriptsize $(0.106,\,0.110)$}} & \makecell{$0.176$\\{\scriptsize $(0.158,\,0.196)$}} & \makecell{$0.620$\\{\scriptsize $(0.613,\,0.627)$}} & \makecell{$0.513$\\{\scriptsize $(0.499,\,0.527)$}} & \makecell{$0.600$\\{\scriptsize $(0.592,\,0.607)$}} & \makecell{$\mathbf{0.298}$\\{\scriptsize $(0.282,\,0.317)$}} \\
+0.4 & \makecell{$0.102$\\{\scriptsize $(0.100,\,0.105)$}} & \makecell{$\mathbf{0.230}$\\{\scriptsize $(0.214,\,0.246)$}} & \makecell{$0.099$\\{\scriptsize $(0.095,\,0.103)$}} & \makecell{$0.159$\\{\scriptsize $(0.143,\,0.177)$}} & \makecell{$0.570$\\{\scriptsize $(0.557,\,0.582)$}} & \makecell{$0.534$\\{\scriptsize $(0.517,\,0.550)$}} & \makecell{$0.544$\\{\scriptsize $(0.527,\,0.557)$}} & \makecell{$\mathbf{0.320}$\\{\scriptsize $(0.305,\,0.333)$}} \\
+0.5 & \makecell{$0.100$\\{\scriptsize $(0.097,\,0.103)$}} & \makecell{$\mathbf{0.167}$\\{\scriptsize $(0.154,\,0.181)$}} & \makecell{$0.087$\\{\scriptsize $(0.085,\,0.089)$}} & \makecell{$0.150$\\{\scriptsize $(0.137,\,0.165)$}} & \makecell{$0.527$\\{\scriptsize $(0.517,\,0.537)$}} & \makecell{$0.550$\\{\scriptsize $(0.534,\,0.566)$}} & \makecell{$0.499$\\{\scriptsize $(0.482,\,0.517)$}} & \makecell{$\mathbf{0.300}$\\{\scriptsize $(0.280,\,0.316)$}} \\
+\bottomrule
+\end{tabular}}
+\caption{Aggregate memorization diagnostics under the AP protocol by noise rate $\tau$: noisy-true accuracy (NTA, the rate at which flipped samples are recovered to their true class) and label-noise memorization rate (LNMR, the rate at which they are predicted as their assigned noisy label). Values are the mean across ten folds with $95\%$ bootstrap confidence intervals below, matching Figure~\ref{fig:nta-lnmr}. The best method per row is in bold: highest NTA and lowest LNMR (less memorization is better). The residual third-class rate is reported in Table~\ref{tab:nta-lnmr-residual-AP}. $\tau = 0$ is omitted as the quantities are undefined without flipped labels.}
+\label{tab:nta-lnmr-AP}
+\end{table}

@@ -1,0 +1,21 @@
+Study: sce_fold05_FINAL
+Direction: MAXIMIZE
+Total trials: 100
+  Completed: 100
+  Failed:    0
+  Pruned:    0
+
+Best value: 0.733560
+Best trial number: 9
+Best params:
+  alpha: 0.34890188454913873
+  beta: 1.2255876808378807
+  A: -7.721297523680014
+
+Top 5 trials:
+       trial       value       alpha        beta           A
+           9      0.7336      0.3489       1.226      -7.721
+          32      0.7176      0.4562      0.7828      -5.845
+          33      0.7095      0.9955       1.057      -6.006
+          85      0.7094      0.3649      0.9056      -5.763
+          39      0.7083       1.119       1.098       -7.44

@@ -1,0 +1,12 @@
+# Hyperparameters chosen by FINAL Optuna search.
+# See /zhome/44/6/204879/projects/Bachelor-Project/results/optuna_final/sce/imbalanced/adam_resnet34_pretrained/tau_20/fold_05/summary.txt for the search summary.
+name: sce
+alpha: 0.34890188454913873
+beta: 1.2255876808378807
+A: -7.721297523680014
+_optuna_provenance:
+  protocol: FINAL
+  study_name: sce_fold05_FINAL
+  best_trial_number: 9
+  best_value: 0.7335598990070025
+  n_trials_completed: 100

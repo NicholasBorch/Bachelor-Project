@@ -1,0 +1,143 @@
+{
+  "balanced_accuracy": 0.49887336999424187,
+  "macro_f1": 0.28427934847952324,
+  "weighted_f1": 0.5291366837688684,
+  "macro_auc": 0.8746936716676518,
+  "per_class_f1": {
+    "akiec": 0.3146067415730337,
+    "bcc": 0.38461538461538464,
+    "bkl": 0.13793103448275862,
+    "df": 0.05434782608695652,
+    "mel": 0.3048780487804878,
+    "nv": 0.6384039900249376,
+    "vasc": 0.15517241379310345
+  },
+  "confusion_matrix": [
+    [
+      14,
+      2,
+      0,
+      4,
+      2,
+      0,
+      1
+    ],
+    [
+      9,
+      10,
+      0,
+      7,
+      0,
+      0,
+      7
+    ],
+    [
+      18,
+      6,
+      6,
+      24,
+      14,
+      1,
+      4
+    ],
+    [
+      1,
+      0,
+      0,
+      5,
+      0,
+      0,
+      1
+    ],
+    [
+      7,
+      1,
+      2,
+      13,
+      25,
+      5,
+      8
+    ],
+    [
+      17,
+      0,
+      6,
+      123,
+      62,
+      256,
+      76
+    ],
+    [
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      9
+    ]
+  ],
+  "n_samples": 747,
+  "method": "asyco_divmix",
+  "total_epochs": 150,
+  "dataset": "imbalanced",
+  "nta": NaN,
+  "lnmr": NaN,
+  "n_flipped": 0,
+  "n_train": 6723,
+  "empirical_flip_rate": 0.0,
+  "per_class_nta_by_clean": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  ],
+  "per_class_lnmr_by_clean": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  ],
+  "per_class_nta_by_noisy": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  ],
+  "per_class_lnmr_by_noisy": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  ],
+  "n_flipped_by_clean": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "n_flipped_by_noisy": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ]
+}

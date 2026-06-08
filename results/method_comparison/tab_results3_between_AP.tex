@@ -1,0 +1,30 @@
+\begin{table}[htbp]
+\centering
+\caption{Best-vs-next-best method comparison under the AP protocol. For each metric and noise rate, the method with the highest mean is compared against the method with the second-highest mean by a paired Wilcoxon signed-rank test on the per-fold differences ($\Delta = \text{best} - \text{next}$), with its $95\%$ bootstrap confidence interval, the matched-pairs rank-biserial correlation $r$, and the Holm-corrected $p$-value across the noise rates within each metric. Comparisons whose pair would involve the baseline are omitted, as they appear in the method-vs-baseline tables. Significance codes: $^{*}p<0.05$, $^{**}p<0.01$, $^{***}p<0.001$.}
+\label{tab:method-between}
+\begin{tabular}{llrrrrl}
+\toprule
+$\tau$ & Comparison & $\Delta$ & 95\% CI & $r$ & $p_{\mathrm{Holm}}$ & sig. \\
+\midrule
+\addlinespace
+\multicolumn{7}{l}{\textit{Balanced accuracy}} \\
+0.1 & SCE vs.\ ELR & +0.099 & $[+0.086,\,+0.113]$ & +1.00 & 0.0098 & +** \\
+0.2 & SCE vs.\ ELR & +0.058 & $[+0.034,\,+0.078]$ & +0.96 & 0.0117 & +* \\
+0.3 & SCE vs.\ ELR & +0.051 & $[+0.039,\,+0.062]$ & +1.00 & 0.0098 & +** \\
+0.4 & SCE vs.\ AsyCo & +0.042 & $[+0.021,\,+0.062]$ & +0.89 & 0.0195 & +* \\
+0.5 & SCE vs.\ AsyCo & +0.031 & $[+0.001,\,+0.061]$ & +0.56 & 0.1309 & n.s. \\
+\addlinespace
+\multicolumn{7}{l}{\textit{Macro F1}} \\
+0.1 & SCE vs.\ AsyCo & +0.214 & $[+0.194,\,+0.234]$ & +1.00 & 0.0098 & +** \\
+0.2 & SCE vs.\ AsyCo & +0.158 & $[+0.146,\,+0.169]$ & +1.00 & 0.0098 & +** \\
+0.3 & SCE vs.\ AsyCo & +0.120 & $[+0.106,\,+0.133]$ & +1.00 & 0.0098 & +** \\
+0.4 & SCE vs.\ AsyCo & +0.069 & $[+0.048,\,+0.089]$ & +1.00 & 0.0098 & +** \\
+0.5 & SCE vs.\ AsyCo & +0.041 & $[+0.031,\,+0.052]$ & +1.00 & 0.0098 & +** \\
+\addlinespace
+\multicolumn{7}{l}{\textit{Macro AUC}} \\
+0.3 & SCE vs.\ AsyCo & +0.017 & $[+0.007,\,+0.027]$ & +0.82 & 0.0586 & n.s. \\
+0.4 & AsyCo vs.\ SCE & +0.004 & $[-0.004,\,+0.012]$ & +0.38 & 0.4648 & n.s. \\
+0.5 & AsyCo vs.\ SCE & +0.006 & $[-0.003,\,+0.014]$ & +0.45 & 0.4648 & n.s. \\
+\bottomrule
+\end{tabular}
+\end{table}

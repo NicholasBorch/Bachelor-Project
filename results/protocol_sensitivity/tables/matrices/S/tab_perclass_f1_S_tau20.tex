@@ -1,0 +1,18 @@
+% Preamble: \usepackage{booktabs,makecell,multirow,graphicx,longtable,amsmath,pdflscape}
+
+\begin{table}[htbp]
+\centering
+\caption{Per-class F1 for protocol S at $\tau=0.20$. Values are fold-averaged descriptive diagnostics.}
+\label{tab:perclass_f1-s-tau20}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lccccccc}
+\toprule
+Method & nv & bkl & mel & bcc & akiec & vasc & df \\
+\midrule
+Baseline & 0.000 & 0.313 & 0.221 & 0.363 & 0.223 & 0.092 & 0.079 \\
+SCE & 0.583 & 0.473 & 0.335 & 0.465 & 0.331 & 0.193 & 0.135 \\
+ELR & 0.001 & 0.307 & 0.241 & 0.406 & 0.230 & 0.084 & 0.076 \\
+AsyCo & 0.003 & 0.163 & 0.237 & 0.393 & 0.269 & 0.063 & 0.043 \\
+\bottomrule
+\end{tabular}}
+\end{table}

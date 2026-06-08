@@ -1,0 +1,18 @@
+% Preamble: \usepackage{booktabs,makecell,multirow,graphicx,longtable,amsmath,pdflscape}
+
+\begin{table}[htbp]
+\centering
+\caption{Balanced accuracy across training protocols at $\tau=0.20$. Cells give the mean over folds with the 95\% bootstrap confidence interval below. Stars mark a significant method-vs-own-protocol-baseline difference (paired Wilcoxon by fold, Holm-corrected across $\tau$ within each method and protocol: $^{*}p<.05$, $^{**}p<.01$, $^{***}p<.001$; no star = n.s.). The best included method per protocol is in bold. The complete noise-rate grid is reported in the appendix.}
+\label{tab:protocol-body-ba}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lcccc}
+\toprule
+Method & SGD / scratch & SGD / pretrained & Adam / scratch & Adam / pretrained \\
+\midrule
+Baseline & \makecell{$0.524$\\{\scriptsize $(0.500,\,0.547)$}} & \makecell{$0.607$\\{\scriptsize $(0.576,\,0.634)$}} & \makecell{$0.519$\\{\scriptsize $(0.497,\,0.539)$}} & \makecell{$0.602$\\{\scriptsize $(0.579,\,0.623)$}} \\
+SCE & \makecell{$\mathbf{0.626}^{+*}$\\{\scriptsize $(0.610,\,0.642)$}} & \makecell{$\mathbf{0.694}^{+*}$\\{\scriptsize $(0.667,\,0.719)$}} & \makecell{$\mathbf{0.597}^{+*}$\\{\scriptsize $(0.574,\,0.620)$}} & \makecell{$\mathbf{0.668}^{+*}$\\{\scriptsize $(0.640,\,0.696)$}} \\
+ELR & \makecell{$0.536$\\{\scriptsize $(0.506,\,0.563)$}} & \makecell{$0.609$\\{\scriptsize $(0.582,\,0.637)$}} & \makecell{$0.494$\\{\scriptsize $(0.463,\,0.520)$}} & \makecell{$0.610$\\{\scriptsize $(0.587,\,0.632)$}} \\
+AsyCo & \makecell{$0.444^{-*}$\\{\scriptsize $(0.415,\,0.473)$}} & \makecell{$0.554$\\{\scriptsize $(0.520,\,0.584)$}} & \makecell{$0.463^{-*}$\\{\scriptsize $(0.449,\,0.478)$}} & \makecell{$0.563$\\{\scriptsize $(0.535,\,0.591)$}} \\
+\bottomrule
+\end{tabular}}
+\end{table}

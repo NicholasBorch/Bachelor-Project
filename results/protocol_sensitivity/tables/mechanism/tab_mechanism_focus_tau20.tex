@@ -1,0 +1,28 @@
+% Preamble: \usepackage{booktabs,makecell,multirow,graphicx,longtable,amsmath,pdflscape}
+
+\begin{table}[htbp]
+\centering
+\caption{Final-epoch memorization diagnostics at $\tau=0.20$ across training protocols. Cells give the fold mean with 95\% bootstrap CI below. NTA is the fraction of flipped samples predicted as their clean class, LNMR the fraction predicted as the assigned noisy label, and residual the fraction predicted as neither.}
+\label{tab:mechanism-focus}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llcccc}
+\toprule
+Diagnostic & Method & SGD / scratch & SGD / pretrained & Adam / scratch & Adam / pretrained \\
+\midrule
+NTA & Baseline & \makecell{$0.104$\\{\scriptsize $(0.100,\,0.108)$}} & \makecell{$0.111$\\{\scriptsize $(0.105,\,0.116)$}} & \makecell{$0.104$\\{\scriptsize $(0.099,\,0.109)$}} & \makecell{$0.116$\\{\scriptsize $(0.110,\,0.120)$}} \\
+ & SCE & \makecell{$0.359$\\{\scriptsize $(0.350,\,0.368)$}} & \makecell{$0.320$\\{\scriptsize $(0.310,\,0.333)$}} & \makecell{$0.323$\\{\scriptsize $(0.305,\,0.340)$}} & \makecell{$0.387$\\{\scriptsize $(0.372,\,0.403)$}} \\
+ & ELR & \makecell{$0.103$\\{\scriptsize $(0.098,\,0.108)$}} & \makecell{$0.117$\\{\scriptsize $(0.113,\,0.122)$}} & \makecell{$0.100$\\{\scriptsize $(0.095,\,0.105)$}} & \makecell{$0.120$\\{\scriptsize $(0.116,\,0.123)$}} \\
+ & AsyCo & \makecell{$0.103$\\{\scriptsize $(0.094,\,0.111)$}} & \makecell{$0.146$\\{\scriptsize $(0.134,\,0.160)$}} & \makecell{$0.111$\\{\scriptsize $(0.104,\,0.119)$}} & \makecell{$0.209$\\{\scriptsize $(0.192,\,0.228)$}} \\
+\addlinespace
+LNMR & Baseline & \makecell{$0.435$\\{\scriptsize $(0.420,\,0.449)$}} & \makecell{$0.744$\\{\scriptsize $(0.732,\,0.758)$}} & \makecell{$0.401$\\{\scriptsize $(0.385,\,0.419)$}} & \makecell{$0.663$\\{\scriptsize $(0.647,\,0.678)$}} \\
+ & SCE & \makecell{$0.455$\\{\scriptsize $(0.445,\,0.465)$}} & \makecell{$0.637$\\{\scriptsize $(0.627,\,0.647)$}} & \makecell{$0.387$\\{\scriptsize $(0.377,\,0.398)$}} & \makecell{$0.502$\\{\scriptsize $(0.489,\,0.516)$}} \\
+ & ELR & \makecell{$0.415$\\{\scriptsize $(0.395,\,0.433)$}} & \makecell{$0.684$\\{\scriptsize $(0.663,\,0.705)$}} & \makecell{$0.367$\\{\scriptsize $(0.354,\,0.379)$}} & \makecell{$0.647$\\{\scriptsize $(0.633,\,0.661)$}} \\
+ & AsyCo & \makecell{$0.240$\\{\scriptsize $(0.225,\,0.254)$}} & \makecell{$0.345$\\{\scriptsize $(0.315,\,0.376)$}} & \makecell{$0.222$\\{\scriptsize $(0.210,\,0.233)$}} & \makecell{$0.322$\\{\scriptsize $(0.305,\,0.339)$}} \\
+\addlinespace
+Residual & Baseline & \makecell{$0.461$\\{\scriptsize $(0.444,\,0.476)$}} & \makecell{$0.145$\\{\scriptsize $(0.134,\,0.156)$}} & \makecell{$0.495$\\{\scriptsize $(0.476,\,0.513)$}} & \makecell{$0.221$\\{\scriptsize $(0.206,\,0.237)$}} \\
+ & SCE & \makecell{$0.185$\\{\scriptsize $(0.175,\,0.198)$}} & \makecell{$0.043$\\{\scriptsize $(0.038,\,0.048)$}} & \makecell{$0.291$\\{\scriptsize $(0.273,\,0.310)$}} & \makecell{$0.111$\\{\scriptsize $(0.102,\,0.119)$}} \\
+ & ELR & \makecell{$0.482$\\{\scriptsize $(0.462,\,0.503)$}} & \makecell{$0.199$\\{\scriptsize $(0.178,\,0.220)$}} & \makecell{$0.532$\\{\scriptsize $(0.520,\,0.546)$}} & \makecell{$0.233$\\{\scriptsize $(0.219,\,0.249)$}} \\
+ & AsyCo & \makecell{$0.657$\\{\scriptsize $(0.638,\,0.679)$}} & \makecell{$0.508$\\{\scriptsize $(0.472,\,0.546)$}} & \makecell{$0.667$\\{\scriptsize $(0.653,\,0.681)$}} & \makecell{$0.469$\\{\scriptsize $(0.443,\,0.492)$}} \\
+\bottomrule
+\end{tabular}}
+\end{table}

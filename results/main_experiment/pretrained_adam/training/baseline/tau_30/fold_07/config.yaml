@@ -1,0 +1,67 @@
+seed: 10
+folds: 10
+image_size: 224
+num_workers: 4
+pin_memory: true
+mixed_precision: true
+num_classes: 7
+class_names:
+- akiec
+- bcc
+- bkl
+- df
+- mel
+- nv
+- vasc
+backbone: resnet34
+oof_backbone: resnet18
+noise_rates:
+- 0.0
+- 0.1
+- 0.2
+- 0.3
+- 0.4
+- 0.5
+noise_sigma: 0.1
+weight_decay: 0.0001
+lr_scheduler: cosine_annealing
+epoch_cap: 300
+cudnn_benchmark: true
+paths:
+  data_raw: data/raw/HAM10000
+  data_processed: data/processed/HAM10000
+  cv_folds: data/processed/HAM10000/cv_folds
+  images: data/processed/HAM10000/one_image_per_lesion/images
+  external: data/external
+  results: results
+  manifests: results/manifests
+data:
+  name: imbalanced
+  metadata_file: HAM10000_metadata_one_per_lesion.csv
+  num_samples: 7470
+  batch_size: 64
+  sampler: weighted_random
+  class_weighted_loss: true
+model:
+  depth: 34
+  pretrained: true
+  weights: IMAGENET1K_V1
+optim:
+  name: adam
+  lr: 0.001
+  betas:
+  - 0.9
+  - 0.999
+  weight_decay: 0.0001
+method:
+  name: baseline
+noise:
+  name: feature_driven
+  sigma: 0.1
+_resolved:
+  method_name: baseline
+  total_epochs: 150
+  seed_used: 100007
+  has_val_df: false
+  has_test_df: true
+  device: cuda

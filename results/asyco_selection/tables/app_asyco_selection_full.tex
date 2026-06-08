@@ -1,0 +1,43 @@
+% Preamble: \usepackage{booktabs,multirow,graphicx,longtable}
+\begin{table}[h!]
+\centering
+\begin{tabular}{llcccc}
+\toprule
+Protocol & $\tau$ & Warm-up & Labeled (\%) & Unlabeled (\%) & Discarded (\%) \\
+\midrule
+\multicolumn{6}{l}{\textit{SGD / scratch}} \\
+ & 0.00 & 23 & 96.5 & 3.5 & 0.0 \\
+ & 0.10 & 23 & 93.6 & 6.4 & 0.0 \\
+ & 0.20 & 23 & 91.7 & 8.3 & 0.0 \\
+ & 0.30 & 23 & 90.4 & 9.6 & 0.0 \\
+ & 0.40 & 23 & 89.1 & 10.9 & 0.0 \\
+ & 0.50 & 23 & 88.0 & 12.0 & 0.0 \\
+\addlinespace
+\multicolumn{6}{l}{\textit{SGD / pretrained}} \\
+ & 0.00 & 10 & 99.0 & 1.0 & 0.0 \\
+ & 0.10 & 10 & 98.0 & 2.0 & 0.0 \\
+ & 0.20 & 10 & 97.3 & 2.7 & 0.0 \\
+ & 0.30 & 10 & 96.5 & 3.5 & 0.0 \\
+ & 0.40 & 10 & 96.5 & 3.5 & 0.0 \\
+ & 0.50 & 10 & 95.9 & 4.1 & 0.0 \\
+\addlinespace
+\multicolumn{6}{l}{\textit{Adam / scratch}} \\
+ & 0.00 & 25 & 92.2 & 7.8 & 0.0 \\
+ & 0.10 & 25 & 86.7 & 13.3 & 0.0 \\
+ & 0.20 & 25 & 84.9 & 15.1 & 0.0 \\
+ & 0.30 & 25 & 82.4 & 17.6 & 0.0 \\
+ & 0.40 & 25 & 81.1 & 18.9 & 0.0 \\
+ & 0.50 & 25 & 79.4 & 20.6 & 0.0 \\
+\addlinespace
+\multicolumn{6}{l}{\textit{Adam / pretrained}} \\
+ & 0.00 & 24 & 98.7 & 1.3 & 0.0 \\
+ & 0.10 & 24 & 97.5 & 2.5 & 0.0 \\
+ & 0.20 & 24 & 96.5 & 3.5 & 0.0 \\
+ & 0.30 & 24 & 95.6 & 4.4 & 0.0 \\
+ & 0.40 & 24 & 94.6 & 5.4 & 0.0 \\
+ & 0.50 & 24 & 93.7 & 6.3 & 0.0 \\
+\bottomrule
+\end{tabular}
+\caption{AsyCo co-divide partition for every protocol and noise rate. Means over the final 10 epochs and ten folds.}
+\label{tab:app-mech-asyco-selection}
+\end{table}

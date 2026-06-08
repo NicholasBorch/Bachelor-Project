@@ -1,0 +1,30 @@
+% Preamble: \usepackage{booktabs,makecell,multirow,graphicx,longtable,amsmath,pdflscape}
+
+\begin{table}[htbp]
+\centering
+\caption{Ranking stability at $\tau=0.20$. The winner and next-best included method are defined descriptively by their mean score across folds. Baseline is included in the ranking so the table reveals when no robust method wins.}
+\label{tab:protocol-ranking-focus}
+\begin{tabular}{lcccc}
+\toprule
+Protocol & Winner & Mean & Next best & Mean \\
+\midrule
+\multicolumn{5}{l}{\textit{Balanced accuracy}} \\
+SGD / scratch & SCE & 0.626 & ELR & 0.536 \\
+SGD / pretrained & SCE & 0.694 & ELR & 0.609 \\
+Adam / scratch & SCE & 0.597 & Baseline & 0.519 \\
+Adam / pretrained & SCE & 0.668 & ELR & 0.610 \\
+\addlinespace
+\multicolumn{5}{l}{\textit{Macro F1}} \\
+SGD / scratch & SCE & 0.359 & ELR & 0.192 \\
+SGD / pretrained & SCE & 0.516 & Baseline & 0.268 \\
+Adam / scratch & SCE & 0.315 & Baseline & 0.183 \\
+Adam / pretrained & SCE & 0.416 & AsyCo & 0.258 \\
+\addlinespace
+\multicolumn{5}{l}{\textit{Macro AUC}} \\
+SGD / scratch & SCE & 0.870 & Baseline & 0.827 \\
+SGD / pretrained & SCE & 0.909 & Baseline & 0.872 \\
+Adam / scratch & SCE & 0.860 & AsyCo & 0.836 \\
+Adam / pretrained & SCE & 0.890 & Baseline & 0.863 \\
+\bottomrule
+\end{tabular}
+\end{table}

@@ -1,0 +1,22 @@
+Study: asyco_divmix_fold05_FINAL
+Direction: MAXIMIZE
+Total trials: 103
+  Completed: 100
+  Failed:    0
+  Pruned:    0
+
+Best value: 0.517666
+Best trial number: 94
+Best params:
+  lambda_u: 1.1687373917021708
+  K: 5
+  temperature: 0.8043317678738009
+  warmup_epochs: 23
+
+Top 5 trials:
+       trial       value    lambda_u           K  temperature  warmup_epochs
+          94      0.5177       1.169           5      0.8043          23
+          92      0.5174      0.4184           5      0.7654          23
+          89      0.5146       1.653           5      0.9797          23
+          21      0.5073       1.275           5      0.9034          23
+          20      0.5021       2.897           5       0.702          21

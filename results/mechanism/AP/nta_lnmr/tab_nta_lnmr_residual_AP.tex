@@ -1,0 +1,16 @@
+\begin{table}[h!]
+\centering
+\begin{tabular}{l*{4}{c}}
+\toprule
+$\tau$ & Baseline & SCE & ELR & AsyCo \\
+\midrule
+0.1 & \makecell{$0.187$\\{\scriptsize $(0.169,\,0.206)$}} & \makecell{$0.070$\\{\scriptsize $(0.063,\,0.078)$}} & \makecell{$0.213$\\{\scriptsize $(0.190,\,0.241)$}} & \makecell{$0.456$\\{\scriptsize $(0.428,\,0.495)$}} \\
+0.2 & \makecell{$0.221$\\{\scriptsize $(0.206,\,0.237)$}} & \makecell{$0.111$\\{\scriptsize $(0.102,\,0.119)$}} & \makecell{$0.233$\\{\scriptsize $(0.219,\,0.248)$}} & \makecell{$0.469$\\{\scriptsize $(0.444,\,0.493)$}} \\
+0.3 & \makecell{$0.271$\\{\scriptsize $(0.264,\,0.277)$}} & \makecell{$0.160$\\{\scriptsize $(0.152,\,0.168)$}} & \makecell{$0.292$\\{\scriptsize $(0.284,\,0.300)$}} & \makecell{$0.526$\\{\scriptsize $(0.502,\,0.547)$}} \\
+0.4 & \makecell{$0.327$\\{\scriptsize $(0.314,\,0.342)$}} & \makecell{$0.236$\\{\scriptsize $(0.223,\,0.249)$}} & \makecell{$0.357$\\{\scriptsize $(0.342,\,0.376)$}} & \makecell{$0.521$\\{\scriptsize $(0.503,\,0.536)$}} \\
+0.5 & \makecell{$0.373$\\{\scriptsize $(0.362,\,0.384)$}} & \makecell{$0.283$\\{\scriptsize $(0.275,\,0.290)$}} & \makecell{$0.414$\\{\scriptsize $(0.394,\,0.432)$}} & \makecell{$0.550$\\{\scriptsize $(0.529,\,0.575)$}} \\
+\bottomrule
+\end{tabular}
+\caption{Residual third-class rate ($1-\text{NTA}-\text{LNMR}$) under the AP protocol by noise rate $\tau$: the fraction of flipped samples predicted as neither their true class nor their assigned noisy label. Values are the mean across ten folds with $95\%$ bootstrap confidence intervals below, computed per fold and bootstrapped directly. This complements the NTA and LNMR values in Table~\ref{tab:nta-lnmr-AP}; the three quantities sum to one. $\tau = 0$ is omitted.}
+\label{tab:nta-lnmr-residual-AP}
+\end{table}
