@@ -1,65 +1,16 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-results_mechanism_internals.py
-==============================================================================
 AsyCo co-divide selection diagnostics from the per-epoch training logs.
 
-AsyCo's co-divide step sorts the training set into a clean (labeled) set, a
-noisy (unlabeled) set and a discarded set, and logs the three counts once per
-epoch in every
+AsyCo's co-divide step sorts the training set into a clean (labeled), noisy
+(unlabeled) and discarded set, logged once per epoch as n_clean / n_noisy /
+n_discard in each fold's training_log.jsonl. This script turns those counts
+into the three fractions and shows that the labeled set stays near-complete
+(its fraction exceeds the clean fraction 1-tau), so corrupted samples are
+admitted to the supervised stream. Counts are searched recursively over a few
+key aliases (KEY_ALIASES); run --probe to print the keys present.
 
-    results/main_experiment/{protocol_dir}/training/asyco_divmix/
-        tau_{tt:02d}/fold_{ff:02d}/training_log.jsonl
-
-as n_clean / n_noisy / n_discard. This script turns those counts into the
-labeled/unlabeled/discarded fractions and shows that the labeled set stays
-near-complete -- i.e. the selection that distinguishes AsyCo barely filters,
-so the corrupted labels enter the supervised stream as misaccepted-clean.
-
-NOTE on scope: this script reports only the selection counts. The earlier
-ELR/SCE loss-component decomposition was removed because a loss-term's value
-is not its optimisation pull (the gradient is), so the loss split could not
-support a claim about each term's effect. Selection counts carry no such
-caveat -- a labeled fraction above the clean fraction (1-tau) proves that
-corrupted samples are admitted, by counting alone (it cannot say *which*
-samples, only the sizes).
-
-Outputs (Adam/pretrained = AP is primary; other protocols shown where they
-deviate):
-
-  FIGURE  (results/mechanism_internals/figures/)
-    p5_asyco_selection_partition.png
-        (a) labeled/unlabeled/discarded fraction over training (AP, focus tau),
-            warm-up shaded, with the 1-tau perfect-filter reference
-        (b) post-warm-up labeled fraction vs tau, all four protocols
-
-  TABLES  (results/mechanism_internals/tables/)
-    p5_asyco_selection_summary.tex   body  : partition at focus tau, 4 protocols
-    app_asyco_selection_full.tex     appx  : partition, every protocol x tau
-
-A "PROSE NUMBERS" block is printed to stdout so the inline numbers in the
-Results text can be confirmed against the data.
-
-------------------------------------------------------------------------------
-SCHEMA ROBUSTNESS
-------------------------------------------------------------------------------
-The counts are searched for recursively at any depth, accepting a few aliases
-(see KEY_ALIASES), so nesting (e.g. under a "divmix" sub-dict) is handled. If
-the keys are not found, run with --probe to print the keys actually present.
-
-    python results_mechanism_internals.py --probe
-
-------------------------------------------------------------------------------
-USAGE
-------------------------------------------------------------------------------
-    python results_mechanism_internals.py
-    python results_mechanism_internals.py --root ./results/main_experiment
-    python results_mechanism_internals.py --thesis-fig-dir Figures/results/p5
-    python results_mechanism_internals.py --focus-tau 0.20 --last-k 10 --probe
-
-Only matplotlib, numpy and pandas are required.
-==============================================================================
+Writes a partition figure and two LaTeX tables under results/mechanism_internals/,
+and prints a "PROSE NUMBERS" block to confirm the inline Results numbers.
 """
 from __future__ import annotations
 
@@ -79,9 +30,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-# =============================================================================
-# configuration  (mirrors results_part4_protocol_sensitivity.py conventions)
-# =============================================================================
+# Configuration (mirrors results_part4_protocol_sensitivity.py conventions)
 @dataclass
 class Config:
     EXPERIMENT_ROOT: Path = Path("./results/main_experiment")
@@ -113,8 +62,7 @@ class Config:
 
     # steady state: mean over the last LAST_K logged epochs of each fold
     LAST_K: int = 10
-    # None -> auto-detect warm-up as the leading epochs with no active partition
-    # (n_noisy == 0 and n_discard == 0). Override with an int if known.
+    # None -> auto-detect warm-up (leading epochs with no active partition)
     WARMUP_EPOCHS: Optional[int] = None
 
     # statistics
@@ -159,9 +107,7 @@ KEY_ALIASES = {
 }
 
 
-# =============================================================================
-# paths and tiny helpers
-# =============================================================================
+# Paths and tiny helpers
 def _asyco_root(protocol: str) -> Path:
     return CFG.EXPERIMENT_ROOT / CFG.PROTOCOL_DIRS[protocol] / "training" / CFG.ASYCO_METHOD_DIR
 
@@ -201,8 +147,7 @@ def _boot_ci(values, seed: int) -> tuple[float, float, float]:
 
 
 def _find_num(obj, names: list[str]):
-    """Breadth-first search for the first key in `names` that maps to a finite
-    number, anywhere in a nested dict/list. Returns float or np.nan."""
+    """BFS for the first key in names mapping to a finite number; float or np.nan."""
     q = deque([obj])
     while q:
         cur = q.popleft()
@@ -234,9 +179,7 @@ def _fmt_pct(x, nd: int = 1) -> str:
     return "--" if x is None or (isinstance(x, float) and not np.isfinite(x)) else f"{100 * float(x):.{nd}f}"
 
 
-# =============================================================================
-# raw log reading
-# =============================================================================
+# Raw log reading
 def _read_log(protocol: str, tau: float, fold: int) -> list[dict]:
     fp = _log_path(protocol, tau, fold)
     if not fp.exists():
@@ -280,9 +223,7 @@ def probe() -> None:
     print("Adjust KEY_ALIASES at the top of the script if a needed key is not matched.\n")
 
 
-# =============================================================================
-# loader -> long DataFrame
-# =============================================================================
+# Loader -> long DataFrame
 def load_selection_long() -> pd.DataFrame:
     """AsyCo co-divide partition sizes, one row per (protocol, tau, fold, epoch)."""
     rows = []
@@ -319,9 +260,7 @@ def load_selection_long() -> pd.DataFrame:
     return df.sort_values(["protocol", "tau", "fold", "epoch"]).reset_index(drop=True)
 
 
-# =============================================================================
-# aggregation
-# =============================================================================
+# Aggregation
 def _detect_warmup(g: pd.DataFrame) -> int:
     """First epoch of a single (protocol,tau,fold) run with an active partition."""
     if CFG.WARMUP_EPOCHS is not None:
@@ -376,9 +315,7 @@ def _epoch_curve(df: pd.DataFrame, protocol: str, tau: float,
     return pd.DataFrame(rows).sort_values("epoch").reset_index(drop=True)
 
 
-# =============================================================================
-# plotting
-# =============================================================================
+# Plotting
 def _style() -> None:
     plt.rcParams.update({
         "font.family": "serif",
@@ -434,7 +371,7 @@ def fig_asyco_partition(df_sel: pd.DataFrame, summ: pd.DataFrame) -> None:
     tau = CFG.FOCUS_TAU
     fig, (axL, axR) = plt.subplots(1, 2, figsize=(11.0, 4.2))
 
-    # ---- (a) trajectory at AP, focus tau --------------------------------
+    # (a) trajectory at AP, focus tau
     cur = _epoch_curve(df_sel, ap, tau, ["frac_clean", "frac_noisy", "frac_discard"])
     if not cur.empty:
         order = [("frac_clean", "Labeled (clean)", "clean"),
@@ -449,9 +386,7 @@ def fig_asyco_partition(df_sel: pd.DataFrame, summ: pd.DataFrame) -> None:
         axL.axhline(1.0 - tau, color=CFG.REFERENCE_GREY, lw=1.1, ls=(0, (4, 3)))
         axL.text(cur["epoch"].max(), 1.0 - tau, r" $1-\tau$ (clean fraction)",
                  color=CFG.REFERENCE_GREY, va="center", ha="left", fontsize=8.5)
-        # warm-up shading: AsyCo logs the partition only after warm-up, so the
-        # curves start at the first post-warm-up epoch. Begin the axis at 0 and
-        # shade [0, warm-up] so the warm-up phase is visible.
+        # warm-up shading: shade [0, warm-up] so the warm-up phase is visible
         wrow = summ[(summ["protocol"] == ap) & (np.isclose(summ["tau"], tau))]
         w = float(wrow["warmup"].iloc[0]) if not wrow.empty else 0.0
         if w > 0:
@@ -466,7 +401,7 @@ def fig_asyco_partition(df_sel: pd.DataFrame, summ: pd.DataFrame) -> None:
                   rf"({CFG.PROTOCOL_LABELS[ap]}, $\tau={tau:.2f}$)")
     axL.legend(loc="center right", frameon=False)
 
-    # ---- (b) post-warm-up labeled fraction vs tau, all protocols ---------
+    # (b) post-warm-up labeled fraction vs tau, all protocols
     taus_sorted = sorted(summ["tau"].unique())
     for protocol in CFG.PROTOCOLS_TO_RUN:
         s = summ[summ["protocol"] == protocol].sort_values("tau")
@@ -491,9 +426,7 @@ def fig_asyco_partition(df_sel: pd.DataFrame, summ: pd.DataFrame) -> None:
     _savefig(fig, "p5_asyco_selection_partition")
 
 
-# =============================================================================
-# tables
-# =============================================================================
+# Tables
 def tab_asyco_selection_body(summ: pd.DataFrame) -> None:
     if summ.empty:
         return
@@ -557,9 +490,7 @@ def tab_asyco_selection_appendix(summ: pd.DataFrame) -> None:
     _write_tex("app_asyco_selection_full", "\n".join(lines))
 
 
-# =============================================================================
-# prose numbers
-# =============================================================================
+# Prose numbers
 def print_prose_numbers(sel_summ: pd.DataFrame) -> None:
     ap, tau = CFG.ANCHOR_PROTOCOL, CFG.FOCUS_TAU
     print("\n" + "=" * 72)
@@ -591,9 +522,7 @@ def print_prose_numbers(sel_summ: pd.DataFrame) -> None:
     print("=" * 72 + "\n")
 
 
-# =============================================================================
-# main
-# =============================================================================
+# Main
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)

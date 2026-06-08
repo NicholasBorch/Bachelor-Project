@@ -1,40 +1,15 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 In-flip label composition under label noise.
 
-For each noise rate tau, one subplot; within a subplot, one column per class.
-Each column is the set of training examples whose *observed* (possibly noisy)
-label is that class, split into:
-  - the genuinely-correct part  (true label == observed label), and
-  - the noisy part              (intruders that flipped IN from other classes).
+For each noise rate tau, one subplot with one column per class. Each column
+is the set of training examples whose observed (possibly noisy) label is that
+class, split into the genuinely-correct part (true == observed) and the noisy
+part (intruders flipped in from other classes). Because the dataset is
+imbalanced, rare classes show a large noisy segment even at modest tau.
 
-Columns are proportions (sum to 1), so the height of the noisy segment is
-exactly 1 - purity for that observed class. Because the dataset is imbalanced,
-rare classes show a large noisy segment even at modest tau (a small flip rate
-out of the majority class can outnumber a rare class's own retained members),
-while the majority class stays almost fully correct. That contrast is the point.
-
-WHAT IT PRODUCES  (under RESULTS_ROOT / ANALYSIS_DIR, e.g. results/label_noise_composition/)
+Writes, under RESULTS_ROOT / ANALYSIS_DIR (e.g. results/label_noise_composition/):
   fig_label_composition_inflip_<noise_model>.pdf / .png
-  label_composition_inflip_<noise_model>.csv   (tidy: tau, class, n_true, n_noisy, total, purity)
-
-============================================================================
-EDIT ONLY THE CONFIG BLOCK.
-============================================================================
-The composition is a property of the noise process, not of any model, so the
-script needs one of:
-
-  SOURCE = "matrix": a row-stochastic transition matrix T per tau
-                     (T[i, j] = P(observed = j | true = i); rows/cols ordered
-                     exactly like CONFIG.CLASSES) plus a class-count vector.
-                     Exact, clean, recommended if you have the matrices.
-  SOURCE = "labels": per-tau arrays of (y_true, y_noisy) over the dataset
-                     (folds pooled). Empirical; use if you only saved the
-                     realised noisy labels.
-  SOURCE = "csv"   : a precomputed tidy CSV with the columns above.
-
-Everything else (the math, the styling) needs no change.
+  label_composition_inflip_<noise_model>.csv  (tau, class, n_true, n_noisy, total, purity)
 """
 
 from __future__ import annotations
@@ -52,23 +27,15 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 
 
-# ============================================================================
-# CONFIG
-# ============================================================================
+# Config
 @dataclass
 class Config:
-    # ---- data source -------------------------------------------------------
-    # "folds"  : your cv tree, read realised noisy labels from train_noisy.csv  (default)
-    # "matrix" : a transition matrix per tau + class counts
-    # "labels" : per-tau (y_true, y_noisy) files, folds pooled
-    # "csv"    : a precomputed tidy file
+    # Data source: "folds" (default) / "matrix" / "labels" / "csv"
     SOURCE: str = "folds"
 
-    # --- SOURCE="folds": your layout ---------------------------------------
-    #   {CV_ROOT}/{SAMPLING}/{NOISE_MODEL}/tau_{NN}/fold_{NN}/{TRAIN_FILE}
-    # tau_NN is tau*100 (tau_00=0.0 ... tau_50=0.5); balanced is ignored.
+    # SOURCE="folds" layout: {CV_ROOT}/{SAMPLING}/{NOISE_MODEL}/tau_{NN}/fold_{NN}/{TRAIN_FILE}
     CV_ROOT: Path = Path("./data/processed/HAM10000/cv_folds")
-    SAMPLING: str = "imbalanced"               # NOT "balanced"
+    SAMPLING: str = "imbalanced"               
     NOISE_MODEL: str = "feature_driven"        # e.g. swap to "normalized" for the other model
     FOLD: int = 0                              # used only when AGGREGATE_FOLDS is False
     AGGREGATE_FOLDS: bool = True               # average the composition over all N_FOLDS folds
@@ -76,31 +43,24 @@ class Config:
     TAU_DIR_FMT: str = "tau_{tt:02d}"
     FOLD_DIR_FMT: str = "fold_{ff:02d}"
     TRAIN_FILE: str = "train_noisy.csv"
-    # column mapping for train_noisy.csv. Your files store the (noisy) working
-    # label in 'dx', the preserved truth in 'dx_clean', and a flip flag in
-    # 'flipped'; with the flag present the truth column is not strictly needed.
+    # Column mapping for train_noisy.csv
     NOISY_LABEL_COL: str = "dx"
     TRUE_LABEL_COL: str = "dx_clean"
     IS_NOISY_COL: str = "flipped"
 
-    # SOURCE="matrix": one matrix file per tau + a counts file.
-    #   matrices: 7x7, rows = true class, cols = observed class, rows sum to 1,
-    #   axis order MUST match CONFIG.CLASSES. .npy or .csv (no header) accepted.
+    # SOURCE="matrix": one transition matrix per tau + a counts file
     T_PATH_TEMPLATE: str = "./noise/transition_tau{tau}.npy"
-    CLASS_COUNTS_PATH: str = "./noise/class_counts.json"   # {"akiec": 327, ...}
+    CLASS_COUNTS_PATH: str = "./noise/class_counts.json"   
 
-    # SOURCE="labels": per-tau label files (folds pooled). Each file holds two
-    #   integer/string columns: true label and noisy label. .npz (keys
-    #   y_true,y_noisy), .npy (Nx2), or .csv (cols named below) accepted.
+    # SOURCE="labels": per-tau (y_true, y_noisy) files, folds pooled
     LABELS_PATH_TEMPLATE: str = "./noise/labels_tau{tau}.csv"
     LABELS_TRUE_COL: str = "y_true"
     LABELS_NOISY_COL: str = "y_noisy"
 
-    # SOURCE="csv": precomputed tidy file with columns
-    #   tau, class, n_true, n_noisy  (total/purity derived if absent)
+    # SOURCE="csv": precomputed tidy file (tau, class, n_true, n_noisy)
     TIDY_CSV_PATH: str = "./noise/label_composition_inflip.csv"
 
-    # ---- design ------------------------------------------------------------
+    # Design
     CLASSES: tuple = ("akiec", "bcc", "bkl", "df", "mel", "nv", "vasc")
     TAUS: tuple = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5)
     ORDER_BY_PREVALENCE: bool = True           # x-axis: largest class first
@@ -111,9 +71,7 @@ class Config:
     NCOLS: int = 3
     XTICK_ROTATION: int = 0                     # 0 so the per-class total sits on a clean second line
 
-    # ---- colours (true = solid teal, noisy = semi-transparent amber) -------
-    # B&W is not a constraint, so transparency does the work and the hatch is
-    # dropped. Teal/amber is a colourblind-safe blue/orange pairing.
+    # Colours (true = solid teal, noisy = semi-transparent amber)
     TRUE_COLOR: str = "#1F7A8C"
     NOISE_COLOR: str = "#E4A552"
     TRUE_ALPHA: float = 0.95
@@ -123,14 +81,11 @@ class Config:
     BAR_EDGE_LW: float = 0.5
     TRUE_LABEL: str = "Correctly labelled"
     NOISE_LABEL: str = "Noisy (flipped in)"
-    # count-label colours: match each bar (amber darkened a touch so it stays legible)
+    # Count-label colours (match each bar)
     TRUE_TEXT_COLOR: str = "#1F7A8C"
     NOISE_TEXT_COLOR: str = "#B8791F"
 
-    # ---- output ------------------------------------------------------------
-    # Everything is written to RESULTS_ROOT / ANALYSIS_DIR, a self-describing
-    # subfolder of your results/ folder. The noise model is appended to the
-    # filenames so feature_driven and normalized runs don't overwrite each other.
+    # Output: written to RESULTS_ROOT / ANALYSIS_DIR; noise model appended to filenames
     RESULTS_ROOT: Path = Path("./results")
     ANALYSIS_DIR: str = "label_noise_composition"
     FIG_STEM: str = "fig_label_composition_inflip"
@@ -142,9 +97,7 @@ class Config:
 CFG = Config()
 
 
-# ============================================================================
-# data loading -> tidy DataFrame  [tau, class, n_true, n_noisy, total, purity, prior_n]
-# ============================================================================
+# Data loading -> tidy DataFrame [tau, class, n_true, n_noisy, total, purity, prior_n]
 def _read_matrix(path: Path) -> np.ndarray:
     if path.suffix == ".npy":
         T = np.load(path)
@@ -173,8 +126,7 @@ def _read_counts() -> np.ndarray:
 
 
 def _inflip_from_matrix(T: np.ndarray, n: np.ndarray):
-    """Return (n_true_per_obs, n_noisy_per_obs) for observed classes.
-    retained_j = n_j T[j,j]; intruders_j = sum_{i!=j} n_i T[i,j]."""
+    """Return (n_true_per_obs, n_noisy_per_obs) for observed classes."""
     contrib = n[:, None] * T            # contrib[i, j] = expected count true=i, obs=j
     total = contrib.sum(axis=0)         # observed-class totals
     retained = np.diag(contrib)         # true == observed
@@ -207,7 +159,7 @@ def _load_labels_rows():
     return rows
 
 
-# ---- SOURCE="folds": read realised noisy labels from the cv tree -----------
+# SOURCE="folds": read realised noisy labels from the cv tree
 def _fold_train_path(tau: float, fold: int) -> Path:
     tt = int(round(tau * 100))
     return (CFG.CV_ROOT / CFG.SAMPLING / CFG.NOISE_MODEL
@@ -345,9 +297,7 @@ def _read_labels(path: Path):
     return df[CFG.LABELS_TRUE_COL].to_numpy(), df[CFG.LABELS_NOISY_COL].to_numpy()
 
 
-# ============================================================================
-# plotting
-# ============================================================================
+# Plotting
 def _class_order(df: pd.DataFrame) -> list[str]:
     present = list(df["class"].unique())
     if CFG.ORDER_BY_PREVALENCE:
@@ -483,8 +433,6 @@ def print_summary(df: pd.DataFrame):
            .reindex(_class_order(df)))
     with pd.option_context("display.float_format", lambda v: f"{v:.2f}"):
         print(piv.to_string())
-    print("\nRare-class contamination is read off the high-tau columns: a value "
-          "near 0.5 means about half of that class's training labels are wrong.\n")
 
 
 def main():

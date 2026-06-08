@@ -114,7 +114,7 @@ submit_one_job() {
         -o "${log_stem}.out" \
         -e "${log_stem}.err" \
         "source ${VENV}/bin/activate && export PYTHONUNBUFFERED=1 && \
-         python -m scripts.final_experiment_train \
+         python -m scripts.stage3_train \
             --method ${method} \
             --dataset ${DATASET} \
             --init ${INIT} \
@@ -163,8 +163,8 @@ echo "  bjobs -w | grep ${JOB_PREFIX}"
 echo "  bjobs -w | grep ${JOB_PREFIX} | awk '{print \$3}' | sort | uniq -c   # state breakdown"
 echo
 echo "Status check (after some jobs complete):"
-echo "  python -m scripts.final_experiment_status"
+echo "  python -m scripts.stage3_status"
 echo
 echo "Analyze (after all jobs complete):"
-echo "  python -m scripts.final_experiment_analyze"
-echo "  python -m scripts.final_experiment_plot_train_diagnostics"
+echo "  python -m scripts.stage4_aggregate"
+echo "  python -m scripts.stage4_train_diagnostics"

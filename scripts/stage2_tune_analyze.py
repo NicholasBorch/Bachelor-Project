@@ -1,24 +1,8 @@
-"""Post-search analysis for the FINAL Optuna study.
+"""
+Post-search analysis for the final Optuna study.
 
-Same outputs as scripts/optuna_analyze.py but reads from
-results/optuna_final/ and supports SCE in addition to ELR and AsyCo.
-
-Outputs (per method, in the study's output directory):
-  summary.txt        — top-K trials, best params, runtime stats
-  all_trials.csv     — every trial's params + objective for spreadsheet inspection
-  best_config.yaml   — drop-in tuned config for configs/method/<method>_tuned.yaml
-  plots/
-    optimization_history.png
-    param_importances.png
-    parallel_coordinate.png
-    slice.png
-    contour_pairs.png
-    trial_validation_curves.png
-
-Usage:
-  python -m scripts.optuna_analyze_final --method elr --fold 9
-  python -m scripts.optuna_analyze_final --method sce --fold 9
-  python -m scripts.optuna_analyze_final --method asyco_divmix --fold 9
+Reads results/optuna_final/ and, per (method, fold), writes a text summary of
+the trials, an all-trials CSV, a drop-in best_config.yaml, and diagnostic plots.
 """
 from __future__ import annotations
 
@@ -28,14 +12,14 @@ import sys
 from pathlib import Path
 
 import matplotlib
-matplotlib.use("Agg")  # noqa: E402
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-import optuna  # noqa: E402
-import pandas as pd  # noqa: E402
-import yaml  # noqa: E402
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import optuna
+import pandas as pd
+import yaml
 
-from src.utils.io import load_config, project_root  # noqa: E402
+from src.utils.io import load_config, project_root
 
 
 def _tau_dirname(tau: float) -> str:
@@ -289,7 +273,7 @@ def main(args: argparse.Namespace) -> int:
     )
     if not out_dir.exists():
         print(
-            f"ERROR: {out_dir} does not exist. Run optuna_search_final.py first.",
+            f"ERROR: {out_dir} does not exist. Run scripts.stage2_tune_search first.",
             file=sys.stderr,
         )
         return 1
@@ -305,8 +289,7 @@ def main(args: argparse.Namespace) -> int:
     summary = _summary_table(study, top_k=int(args.top_k))
     summary_path = out_dir / "summary.txt"
     summary_path.write_text(summary + "\n")
-    print(summary)
-    print(f"\n[analyze] wrote {summary_path}")
+    print(f"[analyze] wrote {summary_path}")
 
     df = _all_trials_csv(study)
     csv_path = out_dir / "all_trials.csv"
@@ -332,7 +315,7 @@ if __name__ == "__main__":
     p.add_argument("--method", required=True,
                    choices=["elr", "sce", "asyco_divmix"])
     p.add_argument("--dataset", default="imbalanced",
-                   choices=["balanced", "imbalanced"])
+                   choices=["imbalanced"])
     p.add_argument("--optim", default="adam", choices=["sgd", "adam"])
     p.add_argument("--model", default="resnet34_pretrained",
                    choices=["resnet34_pretrained", "resnet34_scratch"])

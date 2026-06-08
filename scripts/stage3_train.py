@@ -1,42 +1,11 @@
-"""Main Experiment training entry point — uses TUNED hyperparameters.
+"""
+Main-experiment training entry point: one invocation trains one (method, dataset, init, optim, tau, fold).
 
-One invocation == one job == one (method, dataset, init, optim, tau, fold)
-tuple. The grid is (by default) 4 methods x 1 dataset x 1 init x 1 optim x 6 tau
-x 10 folds = 240 jobs, but every dimension is toggleable from the submit script.
-
-DIFFERENCES vs scripts/stage3_train.py:
-  - Reads tuned hyperparameters from results/optuna_final/.../best_config.yaml
-    for SCE, ELR, AsyCo (paper version). Hard error if the tuned config is
-    missing for a method that requires tuning.
-  - Baseline uses configs/method/baseline.yaml unchanged (no tunable params).
-  - asyco (Eq.5 only) is DROPPED. Only asyco_divmix is included.
-  - Always 150 epochs (matches the Optuna trial budget — no Stage 2 lookup).
-  - Output tree: results/main_experiment/training/...
-  - Idempotent: skips if test_metrics.json exists, unless --force.
-  - Per-epoch training-set NTA / LNMR diagnostics enabled via
-    `--track-train-diagnostics-every` (default 30 = 5 snapshots over 150
-    epochs at epochs 0, 30, 60, 90, 120, plus a final snapshot at epoch
-    149). Pass 0 to disable.
-
-TUNED CONFIG RESOLUTION:
-  results/optuna_final/{method}/{dataset}/{optim}_resnet34_{init}/
-      tau_{tuning_tau*100:02d}/fold_{tuning_fold:02d}/best_config.yaml
-
-  --tuning-fold (default 5) and --tuning-tau (default 0.2) parametrize the
-  lookup so future re-tunes (at e.g. sgd_resnet34_scratch) can be wired in
-  without script changes.
-
-Run:
-    # baseline doesn't need tuning:
-    python -m scripts.final_experiment_train \\
-        --method baseline --dataset imbalanced --init pretrained \\
-        --optim adam --tau 0.2 --fold 0
-
-    # disable per-epoch diagnostics (e.g. for a smoke test):
-    python -m scripts.final_experiment_train \\
-        --method baseline --dataset imbalanced --init pretrained \\
-        --optim adam --tau 0.2 --fold 0 \\
-        --track-train-diagnostics-every 0
+Tuned hyperparameters for SCE/ELR/AsyCo are read from
+results/optuna_final/.../best_config.yaml (hard error if missing); baseline
+uses its config unchanged. Only asyco_divmix is included. Always 150 epochs. 
+Idempotent: skips if test_metrics.json already
+exists unless --force.
 """
 from __future__ import annotations
 
@@ -55,20 +24,18 @@ from src.utils.manifest import write_manifest
 from src.utils.seed import fold_seed
 
 
-# asyco intentionally dropped — only paper-faithful asyco_divmix is included.
+# Methods
 METHOD_CHOICES = ["baseline", "sce", "elr", "asyco_divmix"]
 
-# Fixed epoch budget for the main experiment. Matches Optuna trial budget;
-# no Stage 2 epoch-selection lookup is performed.
+# Fixed epoch budget for the main experiment. Matches Optuna trial budget.
 EPOCHS = 150
 
-# Methods that require a tuned best_config.yaml. Baseline has no tunable
+# Methods that require a tuned best_config.yaml. Baseline has no set tunable
 # hyperparameters and is excluded from the tuning lookup.
 METHODS_REQUIRING_TUNED_CONFIG = {"sce", "elr", "asyco_divmix"}
 
 
 def _tau_dirname(tau: float) -> str:
-    """tau=0.1 -> 'tau_10'. Matches scripts/stage1c_inject_noise.py."""
     return f"tau_{int(round(tau * 100)):02d}"
 
 
@@ -101,7 +68,7 @@ def _tuned_config_path(
 ) -> Path:
     """Resolve the path to the tuned best_config.yaml for this method.
 
-    Format mirrors what scripts/optuna_search_final.py writes:
+    Format mirrors what scripts.stage2_tune_search writes:
         results/optuna_final/{method}/{dataset}/{optim}_resnet34_{init}/
             tau_{XX}/fold_{YY}/best_config.yaml
     """
@@ -141,33 +108,20 @@ def _apply_tuned_config(
             f"To produce it, run the FINAL Optuna search for "
             f"({method}, {dataset}, {init}, {optim}) at "
             f"tau={tuning_tau}, fold={tuning_fold}, then run "
-            f"scripts.optuna_analyze_final.\n"
+            f"scripts.stage2_tune_analyze.\n"
         )
 
     with path.open() as f:
         tuned = yaml.safe_load(f) or {}
 
-    # Drop the provenance block — it's metadata, not method hyperparameters.
     provenance = tuned.pop("_optuna_provenance", None)
 
-    # Replace cfg['method'] entirely. The tuned best_config.yaml started its
-    # life as a copy of configs/method/{method}.yaml, then had the best
-    # Optuna trial's parameters overlaid. So `tuned` is a complete drop-in
-    # method config.
     cfg["method"] = tuned
 
     print(
         f"[final_experiment] loaded tuned config from {path}",
         flush=True,
     )
-    if provenance is not None:
-        print(
-            f"[final_experiment] provenance: "
-            f"trial {provenance.get('best_trial_number')}, "
-            f"best value {provenance.get('best_value'):.4f} "
-            f"({provenance.get('n_trials_completed')} completed trials)",
-            flush=True,
-        )
     return path
 
 
@@ -193,8 +147,7 @@ def main(args: argparse.Namespace) -> int:
         )
         return 2
 
-    # Load the BASE config the way Stage 3 does — gives us the resolved
-    # dataset/model/optim/method/noise stack.
+    # Load the BASE config
     cfg = load_config(
         "base.yaml",
         f"data/{args.dataset}.yaml",
@@ -205,7 +158,7 @@ def main(args: argparse.Namespace) -> int:
     )
     root = project_root()
 
-    # Output directory — checked for idempotency BEFORE any expensive work.
+    # Output directory
     out_dir = (
         root / "results" / "main_experiment" / "training"
         / args.method / args.dataset / f"{args.init}_{args.optim}"
@@ -219,8 +172,7 @@ def main(args: argparse.Namespace) -> int:
         )
         return 0
 
-    # Overlay tuned hyperparameters onto cfg['method']. Hard error if a
-    # required tuned config is missing.
+    # Overlay tuned hyperparameters onto cfg['method'].
     tuned_config_used = _apply_tuned_config(
         cfg,
         method=args.method,
@@ -236,9 +188,6 @@ def main(args: argparse.Namespace) -> int:
 
     images_dir = root / cfg["paths"]["images"]
 
-    # Translate --track-train-diagnostics-every: 0 -> None (disabled), else int.
-    # The runner accepts None to mean "do not run per-epoch diagnostics";
-    # the CLI uses 0 instead so it's friendly to env-var passthrough.
     diag_every = (
         None if int(args.track_train_diagnostics_every) <= 0
         else int(args.track_train_diagnostics_every)
@@ -316,7 +265,7 @@ if __name__ == "__main__":
         description="Main experiment: train one config with TUNED hyperparameters"
     )
     p.add_argument("--method", required=True, choices=METHOD_CHOICES)
-    p.add_argument("--dataset", required=True, choices=["balanced", "imbalanced"])
+    p.add_argument("--dataset", required=True, choices=["imbalanced"])
     p.add_argument("--init", required=True, choices=["pretrained", "scratch"])
     p.add_argument("--optim", required=True, choices=["sgd", "adam"])
     p.add_argument("--tau", required=True, type=float,

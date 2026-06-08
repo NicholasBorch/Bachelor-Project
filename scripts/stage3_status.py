@@ -1,32 +1,9 @@
-"""Main Experiment status checker — read-only completeness report.
+"""
+Read-only completeness report for the main-experiment grid.
 
-Walks results/main_experiment/training/ and reports, for every expected
-(method, dataset, init, optim, tau, fold) tuple, whether the job is:
-
-  COMPLETE      — test_metrics.json exists AND training_log.jsonl has 150 entries
-  RUNNING       — training_log.jsonl exists but < 150 epochs, no test_metrics yet
-  INCOMPLETE    — training_log.jsonl has < 150 entries, no test_metrics.json
-                  (i.e. job was killed mid-training)
-  NO_METRICS    — 150 epochs reached but test_metrics.json missing (rare;
-                  usually means runner crashed after final epoch)
-  MISSING       — no output directory at all
-
-Usage:
-    # default: walk the same grid the submit script would generate, using
-    # the current run's environment defaults (imbalanced, pretrained, adam)
-    python -m scripts.final_experiment_status
-
-    # check a different condition:
-    python -m scripts.final_experiment_status --init scratch --optim sgd
-
-    # restrict to one method:
-    python -m scripts.final_experiment_status --methods asyco_divmix
-
-    # show full per-job table (default just shows summary):
-    python -m scripts.final_experiment_status --verbose
-
-Exit code is 0 if all expected jobs are COMPLETE, else 1. Useful for
-gating downstream analysis with a quick `&&` check.
+Walks results/main_experiment/training/ and classifies every expected
+(method, dataset, init, optim, tau, fold) job as COMPLETE / RUNNING_OR_INCOMPLETE
+/ NO_METRICS / MISSING. Exits 0 only if all expected jobs are COMPLETE.
 """
 from __future__ import annotations
 
@@ -72,7 +49,6 @@ def _classify(job_dir: Path) -> tuple[str, int]:
     if metrics_path.exists():
         if n_epochs >= EXPECTED_EPOCHS:
             return "COMPLETE", n_epochs
-        # Has metrics but log is short — strange edge case
         return "COMPLETE", n_epochs
 
     # No test_metrics.json
@@ -172,7 +148,7 @@ def main(args: argparse.Namespace) -> int:
             print(f"  ... and {len(incomplete_jobs) - 20} more "
                   f"(use --verbose to see all)")
 
-        # Also write a resubmit-helper file so they're easy to re-launch
+        # Also write a resubmit-helper file
         out_path = root / "logs" / "final_experiment" / "incomplete_jobs.txt"
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with out_path.open("w") as f:

@@ -1,28 +1,10 @@
-"""Stage 1b: collect out-of-fold softmax probabilities for feature-driven IDN.
+"""
+Stage 1b: collect out-of-fold softmax probabilities for feature-driven IDN.
 
-For a given fold N: train ResNet-18 on folds != N using CLEAN labels only,
-then run inference on fold N to get (n_held_out, 7) softmax predictions.
-
-OOF training protocol (PROJECT_DOCUMENTATION §6 Stage 1b / §9):
-    - Backbone: ResNet-18 pretrained on ImageNet
-    - Optimizer: Adam, lr=1e-4 (no momentum betas override, no weight decay)
-    - Schedule: CosineAnnealingLR over 30 epochs
-    - Epoch budget: 30 for both balanced and imbalanced
-    - Sampling: WeightedRandomSampler + class-weighted CE for imbalanced;
-                standard shuffle + unweighted CE for balanced
-    - Seed: per-fold `global_seed * 10_000 + fold_id`
-
-This protocol is a fixed preprocessing step — it is NOT tuned for HAM10000.
-The point of Stage 1b is to produce reasonable OOF confusion signals for
-feature-driven IDN, not to produce a state-of-the-art classifier.
-
-Output: data/processed/HAM10000/cv_folds/{dataset}/oof_probs/fold_{NN}.npy
-        data/processed/HAM10000/cv_folds/{dataset}/oof_probs/fold_{NN}_ids.csv
-
-This script is parallelizable across folds via HPC. Run once per fold.
-After all 10 folds complete, run stage1b_merge_oof_probs.py.
-
-Run: python -m scripts.stage1b_collect_oof_probs --dataset imbalanced --fold 0
+For fold N, train a fixed ResNet-18 (ImageNet-pretrained, Adam, cosine, 30
+epochs) on folds != N with CLEAN labels, then run inference on fold N to get
+(n_held_out, 7) softmax predictions. Run once per fold, then merge with
+stage1b_merge_oof_probs. Writes fold_{NN}.npy and fold_{NN}_ids.csv.
 """
 from __future__ import annotations
 
@@ -45,7 +27,7 @@ from src.utils.io import ensure_dir, load_config, project_root
 from src.utils.manifest import write_manifest
 from src.utils.seed import fold_seed, seed_everything
 
-# ── OOF training protocol — FIXED, see module docstring ──────────────────────
+# Fixed OOF training protocol (see module docstring).
 OOF_EPOCHS = 30
 OOF_LR = 1e-4
 
@@ -78,7 +60,7 @@ def main(args: argparse.Namespace) -> int:
     cfg = load_config("base.yaml", f"data/{args.dataset}.yaml")
     root = project_root()
 
-    # ------- Prerequisites ---------
+    # Prerequisites
     fa_path = root / cfg["paths"]["cv_folds"] / args.dataset / "fold_assignments.csv"
     folds_df = load_fold_assignments(fa_path)
 
@@ -93,13 +75,13 @@ def main(args: argparse.Namespace) -> int:
     train_df, test_df = split_train_test_by_fold(metadata, folds_df, test_fold=args.fold)
     print(f"[stage1b] fold {args.fold}: train={len(train_df)}, held-out={len(test_df)}")
 
-    # ------- Seed ---------
+    # Seed
     seed_everything(fold_seed(cfg["seed"], args.fold), deterministic=False)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if cfg.get("cudnn_benchmark", True):
         torch.backends.cudnn.benchmark = True
 
-    # ------- Datasets / Loaders ---------
+    # Datasets / loaders
     train_ds = HamDataset(
         train_df, images_dir=images_dir, transform=get_train_transforms(cfg["image_size"]),
     )
@@ -127,11 +109,7 @@ def main(args: argparse.Namespace) -> int:
         persistent_workers=cfg["num_workers"] > 0,
     )
 
-    # ------- Model / Optimizer (ResNet-18, Adam, cosine, 30 epochs) ----------
-    # NOTE: This is the locked OOF protocol — see module docstring.
-    # The OOF model is a preprocessing step for feature-driven IDN, not a
-    # production classifier. Do not tune these hyperparameters; any change
-    # changes the injected noise and therefore the whole experiment.
+    # Model / optimizer (ResNet-18, Adam, cosine, 30 epochs)
     model = build_resnet(num_classes=NUM_CLASSES, depth=18, pretrained=True).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=OOF_LR)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=OOF_EPOCHS)
@@ -143,7 +121,7 @@ def main(args: argparse.Namespace) -> int:
         enabled=cfg.get("mixed_precision", True) and device.type == "cuda",
     )
 
-    # ------- Train ---------
+    # Train
     print(
         f"[stage1b] training ResNet-18 with Adam(lr={OOF_LR}) for "
         f"{OOF_EPOCHS} epochs on fold {args.fold}"
@@ -172,7 +150,7 @@ def main(args: argparse.Namespace) -> int:
                 f"avg_loss={total_loss / max(n_batches, 1):.4f}"
             )
 
-    # ------- Held-out inference ---------
+    # Held-out inference
     print(f"[stage1b] running inference on held-out fold {args.fold}")
     model.eval()
     probs_chunks = []
@@ -188,7 +166,7 @@ def main(args: argparse.Namespace) -> int:
     all_probs = np.concatenate(probs_chunks, axis=0)
     assert all_probs.shape == (len(test_df), NUM_CLASSES)
 
-    # ------- Save ---------
+    # Save
     out_dir = ensure_dir(root / cfg["paths"]["cv_folds"] / args.dataset / "oof_probs")
     npy_path = out_dir / f"fold_{args.fold:02d}.npy"
     ids_path = out_dir / f"fold_{args.fold:02d}_ids.csv"
@@ -197,7 +175,7 @@ def main(args: argparse.Namespace) -> int:
     print(f"[stage1b] wrote {npy_path} (shape {all_probs.shape})")
     print(f"[stage1b] wrote {ids_path}")
 
-    # ------- Manifest ---------
+    # Manifest
     manifest_path = root / cfg["paths"]["manifests"] / f"stage1b_{args.dataset}_fold{args.fold:02d}.json"
     write_manifest(
         manifest_path,

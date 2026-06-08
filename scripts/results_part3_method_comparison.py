@@ -1,31 +1,11 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-Results Part 3 - Method comparison under label noise (RQ2) + associated appendix.
+Results Part 3 - method comparison under label noise (RQ2) and appendix tables.
 
-WHAT THIS PRODUCES (into results/method_comparison/)
-  1. fig_results3_money_<P>.pdf/.png  (combined side-by-side grouped bars; AP: BA + Macro F1, other protocols: all three)
-  2. fig_results3_<metric>_<P>.pdf/.png  (individual grouped-bar plot per metric: BA, MacroF1, MacroAUC)
-  3. tab_results3_body_<P>.tex        (tau rows, method-grouped cols for all three metrics, mean+CI, signed sig)
-  4. tab_app_mvb_wilcoxon_<P>.tex                      (full method-vs-baseline stats)
-  5. tab_app_noise_vs_clean_<P>.tex                    (noise-sensitivity)
-  6. tab_app_method_vs_method_<P>.tex                  (pairwise, appendix only)
-Plus a printed "PROSE HELPER" block for the body commentary.
-
-============================================================================
-EDIT ONLY THE CONFIG BLOCK.
-============================================================================
-Wired for the repo tree:
-
-  results/main_experiment/{PROTOCOL_DIR}/training/{METHOD_DIR}/tau_{NN}/fold_{NN}/test_metrics.json
-
-PROTOCOL_DIR e.g. 'pretrained_adam'; METHOD_DIR e.g. 'asyco_divmix'; tau_NN is
-tau*100 (tau_00..tau_50); fold_NN is the fold. 'figures_and_tables' and any
-other results/ folder are ignored.
-
-Run once: it PRINTS the method dirs found on disk and the metric keys in the
-first test_metrics.json. If a method dir name or metric key does not match,
-fix METHOD_DIRS / METRIC_KEYS in CONFIG and re-run. Nothing is guessed silently.
+Reads results/main_experiment/{protocol}/training/{method}/tau_NN/fold_NN/
+test_metrics.json and writes into results/method_comparison/: grouped-bar
+figures (combined and per-metric), a body table (mean + bootstrap CI with
+signed significance), and appendix stats tables (method-vs-baseline,
+noise-vs-clean, method-vs-method).
 """
 
 from __future__ import annotations
@@ -50,15 +30,13 @@ from matplotlib.patches import Patch
 import scripts.thesis_paired_stats as TPS
 
 
-# ============================================================================
-# CONFIG
-# ============================================================================
+# config
 @dataclass
 class Config:
     EXPERIMENT_ROOT: Path = Path("./results/main_experiment")
-    TRAINING_SUBDIR: str = "training"          # "" if methods sit directly under protocol
+    TRAINING_SUBDIR: str = "training"          
     METRICS_FILENAME: str = "test_metrics.json"
-    TAU_DIR_FMT: str = "tau_{tt:02d}"          # tau*100, zero-padded
+    TAU_DIR_FMT: str = "tau_{tt:02d}"          
     FOLD_DIR_FMT: str = "fold_{ff:02d}"
 
     PROTOCOL_DIRS: dict = field(default_factory=lambda: {
@@ -68,9 +46,7 @@ class Config:
         # "S":  "scratch_sgd",
     })
 
-    # logical method -> folder name on disk. 'asyco_divmix' confirmed; the other
-    # three are placeholders -- set them to the real dir names (the script prints
-    # the dirs it finds so you can copy them verbatim).
+    # logical method -> folder name on disk
     METHOD_DIRS: dict = field(default_factory=lambda: {
         "baseline": "baseline",
         "SCE":      "sce",
@@ -83,7 +59,7 @@ class Config:
         "MacroF1":  ["macro_f1", "f1_macro", "macro_F1", "f1macro", "f1_macro_avg"],
         "MacroAUC": ["macro_auc", "auc_macro", "macro_AUC", "roc_auc_macro", "auroc_macro"],
     })
-    # try each as a wrapping prefix in case metrics are nested; "" = top level
+    # nesting prefixes to try ("" = top level)
     METRIC_NEST_KEYS: tuple = ("", "test", "metrics", "test_metrics")
 
     METHODS: tuple = ("baseline", "SCE", "ELR", "AsyCo")
@@ -96,10 +72,7 @@ class Config:
     N_FOLDS: int = 10
 
     BODY_METRICS: tuple = ("BA", "MacroF1")
-    # Metrics shown in the combined side-by-side figure, per protocol. AP is the
-    # special case where only BA and Macro F1 sit next to each other; every other
-    # protocol shows all three. (Individual single-metric plots are emitted for
-    # all three metrics regardless of protocol.)
+    # metrics shown side-by-side in the combined figure, per protocol
     COMBINED_FIG_METRICS: dict = field(default_factory=lambda: {
         "AP": ("BA", "MacroF1"),
     })
@@ -141,9 +114,7 @@ def _out_dir() -> Path:
     return d
 
 
-# ============================================================================
 # small utilities
-# ============================================================================
 def _seed_for(*parts) -> int:
     h = hashlib.sha256(("|".join(map(str, parts))).encode()).hexdigest()
     return (CFG.SEED + int(h[:8], 16)) % (2**32 - 1)
@@ -182,9 +153,7 @@ def fmt_W(w):
     return f"{w:.0f}" if abs(w - round(w)) < 1e-9 else f"{w:.1f}"
 
 
-# ============================================================================
 # data loading
-# ============================================================================
 def _read_json(fp: Path) -> dict:
     with open(fp, "r") as fh:
         return json.load(fh)
@@ -318,9 +287,7 @@ def completeness_report(df, protocol):
     print()
 
 
-# ============================================================================
 # statistics
-# ============================================================================
 def bootstrap_ci(values, n_boot=None, ci=None, seed=0):
     n_boot = CFG.N_BOOT if n_boot is None else n_boot
     ci = CFG.CI if ci is None else ci
@@ -492,16 +459,13 @@ def method_vs_method(df, protocol):
     return pd.DataFrame(recs)
 
 
-# ============================================================================
 # plotting
-# ============================================================================
 def _apply_style():
     plt.rcParams.update({
-        # Thesis figure formatting convention: matplotlib native serif
-        # (Palatino), no LaTeX, HPC-safe; falls back to DejaVu Serif.
+        # serif (Palatino) matplotlib style, no LaTeX
         "font.family":        "serif",
         "font.serif":         ["Palatino", "Palatino Linotype", "Book Antiqua", "DejaVu Serif"],
-        "mathtext.fontset":   "cm",      # serif math, e.g. $\tau$, matches body text
+        "mathtext.fontset":   "cm",      # serif math
         "axes.unicode_minus": False,
         "figure.dpi": 150, "savefig.dpi": CFG.FIG_DPI, "font.size": 11,
         "axes.titlesize": 12, "axes.labelsize": 11, "xtick.labelsize": 10,
@@ -542,8 +506,7 @@ def _grouped_bar_panel(ax, summary, mvb_stats, metric, protocol, show_sig=True,
                 sym = sig_symbol(st.loc[tau, pcol], ns=CFG.SHOW_NS_IN_FIG)
                 if not sym:
                     continue
-                # Prepend +/- so the star communicates whether the method is
-                # significantly BETTER (+) or WORSE (-) than the baseline.
+                # prepend +/- for better/worse than baseline
                 if sym != CFG.NS_SYMBOL:
                     direction = st.loc[tau, "direction"] if "direction" in st.columns else np.sign(st.loc[tau, "mean_delta"])
                     if direction > 0:
@@ -558,8 +521,7 @@ def _grouped_bar_panel(ax, summary, mvb_stats, metric, protocol, show_sig=True,
     disp, ylab, ymin, ymax = CFG.METRIC_DISPLAY[metric]
     ax.set_xticks(x); ax.set_xticklabels([f"{t:.1f}" for t in taus])
     ax.set_xlabel(r"Noise rate $\tau$"); ax.set_ylabel(ylab); ax.set_title(disp)
-    # A shared y-axis range (passed in) keeps every panel the same height so the
-    # three metrics are visually comparable; fall back to the per-metric range.
+    # shared y-range keeps panels comparable; else per-metric range
     if ylim is not None:
         ax.set_ylim(*ylim)
     else:
@@ -580,12 +542,7 @@ def _savefig(fig, stem):
 
 
 def fig_money(summary, mvb_stats, protocol, metrics=None, fname=None):
-    # NOTE: We need to have the plus and minus before the significance stars to
-    # indicate if it is better or worse significantly (handled in
-    # _grouped_bar_panel: +stars = significantly better than baseline,
-    # -stars = significantly worse).
-    # Which metrics sit side by side depends on the protocol: AP shows BA +
-    # Macro F1 only; every other protocol shows all three.
+    # which metrics sit side-by-side depends on the protocol
     if metrics is None:
         metrics = list(CFG.COMBINED_FIG_METRICS.get(
             protocol, CFG.COMBINED_FIG_METRICS_DEFAULT))
@@ -594,14 +551,12 @@ def fig_money(summary, mvb_stats, protocol, metrics=None, fname=None):
                              sharey=True)
     if len(metrics) == 1:
         axes = [axes]
-    # Shared y-axis so all panels have the same height/scale and are directly
-    # comparable. 0..1 covers every metric (BA, Macro F1, Macro AUC) honestly.
+    # shared 0..1 y-axis so all panels are comparable
     shared_ylim = (0.0, 1.0)
     for ax, metric in zip(axes, metrics):
         _grouped_bar_panel(ax, summary, mvb_stats, metric, protocol,
                            ylim=shared_ylim)
-    # With a shared axis, give the leftmost panel a generic label and clear the
-    # per-metric labels on the rest (the panel titles name each metric).
+    # leftmost panel keeps a generic label; clear the rest
     axes[0].set_ylabel("Score")
     for ax in axes[1:]:
         ax.set_ylabel("")
@@ -617,8 +572,7 @@ def fig_money(summary, mvb_stats, protocol, metrics=None, fname=None):
 
 
 def fig_single_metric(summary, mvb_stats, protocol, metric, fname=None):
-    """One standalone grouped-bar plot for a single metric. Emitted for every
-    metric and every protocol so each metric also has its own figure."""
+    """One standalone grouped-bar plot for a single metric."""
     _apply_style()
     fig, ax = plt.subplots(figsize=(6.6, 4.6))
     _grouped_bar_panel(ax, summary, mvb_stats, metric, protocol, ylim=(0.0, 1.0))
@@ -640,9 +594,7 @@ def fig_all_single_metrics(summary, mvb_stats, protocol):
             fig_single_metric(summary, mvb_stats, protocol, metric)
 
 
-# ============================================================================
 # LaTeX tables
-# ============================================================================
 REQUIRED_PACKAGES = r"""% Preamble: \usepackage{booktabs,makecell,multirow,graphicx,longtable}
 """
 
@@ -782,9 +734,7 @@ def _stats_table(stats_df, protocol, stem, caption, label, kind):
                 r"$p_{\mathrm{raw}}$ & $p_{\mathrm{Holm}}$ & sig. \\")
     colspec = "llrrrrrrl"
     ncols = len(colspec)
-    # Emit a longtable so the (tall) appendix tables break across pages, with the
-    # header repeated on each page. longtable cannot be wrapped in \resizebox
-    # (it spans page breaks), so a small font keeps it within \textwidth instead.
+    # longtable so tall appendix tables break across pages
     tex = [
         r"\begin{small}",
         r"\setlength{\LTcapwidth}{\textwidth}",
@@ -832,9 +782,7 @@ def tex_method_vs_method(mvm, protocol):
                  f"tab:app_method_vs_method_{protocol}", kind="mvm")
 
 
-# ============================================================================
 # prose helpers
-# ============================================================================
 def print_prose_helpers(summary, mvb_stats, nvc_stats, protocol):
     print("\n" + "=" * 74)
     print(f"PROSE HELPER  -  facts for the Results.3 commentary (protocol {protocol})")
@@ -869,8 +817,6 @@ def print_prose_helpers(summary, mvb_stats, nvc_stats, protocol):
             print(f"   best on {CFG.METRIC_DISPLAY[metric][0]:16s}: "
                   f"{CFG.METHOD_LABELS.get(best['method'], best['method'])} "
                   f"({fmt_metric(best['mean'])})")
-    print("   -> if these differ, a method buys aggregate accuracy without fixing "
-          "the minority classes; flag it (clinically relevant).")
     print("\n[Noise-sensitivity summary (robust methods, tau vs clean)]")
     for metric in CFG.BODY_METRICS:
         for method in [m for m in CFG.METHODS if m != CFG.BASELINE]:
@@ -882,9 +828,7 @@ def print_prose_helpers(summary, mvb_stats, nvc_stats, protocol):
     print("=" * 74 + "\n")
 
 
-# ============================================================================
 # main
-# ============================================================================
 def main():
     P = CFG.PRIMARY_PROTOCOL
     print(f"Loading data from {CFG.EXPERIMENT_ROOT} ...")

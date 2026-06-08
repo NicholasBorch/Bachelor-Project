@@ -1,48 +1,14 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-Results.3 - best-vs-next-best method comparison (body Table 3.5, tab:method-between).
+Results.3 - best-vs-next-best method comparison.
 
 For each protocol and metric, at every noise rate tau the four methods are ranked
-by their fold-mean score, and the highest-mean method (rank 1) is compared against
-the second-highest (rank 2) on the ten per-fold differences. The comparison uses
-the SAME paired machinery as the rest of the thesis (thesis_paired_stats), so the
-numbers here are identical to those the Part 4 protocol-sensitivity script produces
-for the same cells.
+by fold-mean score and the rank-1 method is compared against rank-2 on the ten
+per-fold differences, using the shared paired machinery (thesis_paired_stats).
+Holm correction is applied across the six tau within each (protocol, metric).
 
-FAMILY / CORRECTION (the choices locked for this thesis):
-  * The Holm family is the SIX noise rates tau in {0.0, 0.1, ..., 0.5} WITHIN each
-    (protocol, metric). tau=0 (clean) IS included: on clean data the rank-1/rank-2
-    pair is simply whichever two methods have the highest means, and the comparison
-    is reported like any other rate.
-  * Every cell is tested AND displayed -- including cells where the runner-up (rank 2)
-    happens to be the baseline. In a best-vs-next table that is a true statement
-    ("the baseline was the runner-up here"), not a duplicate of the method-vs-baseline
-    table, so it is not suppressed. Showing all six rows keeps the displayed table
-    self-consistent with its own m=6 Holm correction.
-  * The family is EXPLORATORY: the tested pair is selected by rank from the observed
-    means rather than pre-specified, so the p-values are read descriptively. The
-    pre-specified pairwise family (the method_vs_method table) is the confirmatory
-    counterpart.
-
-  At n=10 the raw two-sided floor is 2/2^10 ~= 0.00195; Holm over m=6 inflates the
-  smallest reportable p to 6 * 0.00195 ~= 0.012.
-
-INFERENCE vs BOOTSTRAP (unchanged from the shared module):
-  * The Wilcoxon test, the permutation test, W and the rank-biserial r are all
-    computed on the TEN TRUE PER-FOLD DIFFERENCES. No bootstrap enters the test.
-  * The bootstrap (resampling the fold differences) is used ONLY for the 95% CI on
-    the mean difference -- an effect-size band, not a significance test.
-
-OUTPUT (into results/method_comparison/best_vs_next/)
-  tab_best_vs_next_<P>.tex   LaTeX body table (rows = tau, all six shown), label
-                             tab:method-between for the primary protocol.
-  _best_vs_next_<P>.csv      tidy values behind the table (one row per tau & metric).
-
-CONFIG: edit only the block below. To run other protocols than AP, uncomment them
-in PROTOCOLS and add them to PROTOCOLS_TO_RUN. The folder layout mirrors the Part 3
-and Part 4 scripts:
-  results/main_experiment/{PROTOCOL_DIR}/training/{METHOD_DIR}/tau_{NN}/fold_{NN}/test_metrics.json
+Writes into results/method_comparison/best_vs_next/:
+  tab_best_vs_next_<P>.tex   LaTeX body table (rows = tau), label tab:method-between for AP.
+  _best_vs_next_<P>.csv      tidy values behind the table.
 """
 
 from __future__ import annotations
@@ -57,20 +23,17 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-# Shared statistics module -- identical machinery to every other Results script.
-# If your import path differs, adjust this line only (e.g. `import thesis_paired_stats as TPS`).
+# Shared statistics module (identical machinery to every other Results script)
 import thesis_paired_stats as TPS
 
 
-# ============================================================================
-# CONFIG
-# ============================================================================
+# Config
 @dataclass
 class Config:
     EXPERIMENT_ROOT: Path = Path("./results/main_experiment")
-    TRAINING_SUBDIR: str = "training"          # "" if methods sit directly under protocol
+    TRAINING_SUBDIR: str = "training"          
     METRICS_FILENAME: str = "test_metrics.json"
-    TAU_DIR_FMT: str = "tau_{tt:02d}"          # tau*100, zero-padded
+    TAU_DIR_FMT: str = "tau_{tt:02d}"          
     FOLD_DIR_FMT: str = "fold_{ff:02d}"
 
     # logical protocol -> on-disk folder name.
@@ -130,9 +93,7 @@ def _out() -> Path:
     return d
 
 
-# ============================================================================
-# small utilities
-# ============================================================================
+# Small utilities
 def _seed_for(*parts) -> int:
     h = hashlib.sha256(("|".join(map(str, parts))).encode()).hexdigest()
     return (CFG.SEED + int(h[:8], 16)) % (2 ** 32 - 1)
@@ -166,8 +127,7 @@ def _flatten(d: dict, prefix: str = "") -> dict:
 
 
 def _extract_metric(d: dict, aliases) -> Optional[float]:
-    """Find a metric value by trying alias keys at the top level and under a few
-    common nesting prefixes."""
+    """Find a metric value by trying alias keys at the top level and common nests."""
     flat = _flatten(d)
     # direct / nested-prefixed alias hits
     for nest in CFG.METRIC_NEST_KEYS:
@@ -205,9 +165,7 @@ def _metrics_path(protocol: str, method: str, tau: float, fold: int) -> Path:
     return _protocol_root(protocol) / mdir / _tau_dir(tau) / _fold_dir(fold) / CFG.METRICS_FILENAME
 
 
-# ============================================================================
-# load -> long DataFrame (protocol, method, tau, fold, <metric columns>)
-# ============================================================================
+# Load -> long DataFrame (protocol, method, tau, fold, <metric columns>)
 def load_long_df(protocols) -> pd.DataFrame:
     rows = []
     for protocol in protocols:
@@ -241,9 +199,7 @@ def _wide_fold(df: pd.DataFrame, protocol: str, metric: str, tau: float) -> pd.D
     return sub.pivot_table(index="fold", columns="method", values=metric)
 
 
-# ============================================================================
-# ranking + best-vs-next (the family)
-# ============================================================================
+# Ranking + best-vs-next (the family)
 def _fold_means(df: pd.DataFrame, protocol: str, metric: str, tau: float) -> pd.Series:
     """Mean over folds per method (the TRUE fold means used for ranking)."""
     w = _wide_fold(df, protocol, metric, tau)
@@ -251,9 +207,7 @@ def _fold_means(df: pd.DataFrame, protocol: str, metric: str, tau: float) -> pd.
 
 
 def best_vs_next(df: pd.DataFrame, protocol: str) -> pd.DataFrame:
-    """For each metric, build the six-tau block (incl. clean), test rank-1 vs
-    rank-2 on the true per-fold differences, then Holm-correct ACROSS the six tau
-    within the metric. Every cell is kept (no baseline-row suppression)."""
+    """Build the six-tau block per metric, test rank-1 vs rank-2, Holm across tau."""
     recs = []
     for metric in CFG.TABLE_METRICS:
         block = []
@@ -303,9 +257,7 @@ def best_vs_next(df: pd.DataFrame, protocol: str) -> pd.DataFrame:
     return pd.DataFrame(recs)
 
 
-# ============================================================================
 # LaTeX table
-# ============================================================================
 def _fmt_signed(x, nd=3):
     if x is None or (isinstance(x, float) and np.isnan(x)):
         return "--"
@@ -388,9 +340,7 @@ def emit_table(stats_df: pd.DataFrame, protocol: str):
     print(f"[tab] wrote {fp}")
 
 
-# ============================================================================
-# main
-# ============================================================================
+# Main
 def main():
     print(f"Loading from {CFG.EXPERIMENT_ROOT} ...")
     df = load_long_df(CFG.PROTOCOLS_TO_RUN)

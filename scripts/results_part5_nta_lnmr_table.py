@@ -1,21 +1,15 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Results.5 - table of aggregate NTA and LNMR (with bootstrap CIs).
 
-Emits the exact values plotted in the memorization-diagnostics figure
-(fig:nta-lnmr): per method and noise rate, the fold-mean NTA and LNMR with a
-95% bootstrap confidence interval across the ten folds. The bootstrap settings
-match the figure (same N_BOOT and SEED), so the table and the plot are
-numerically identical.
+Emits the values plotted in the memorization-diagnostics figure (fig:nta-lnmr):
+per method and noise rate, the fold-mean NTA and LNMR with a 95% bootstrap CI
+across the ten folds, using the figure's bootstrap settings (same N_BOOT, SEED)
+so the table and plot are numerically identical. tau = 0 is omitted (both
+quantities undefined with no flipped labels).
 
-tau = 0 is omitted (both quantities undefined with no flipped labels).
-
-OUTPUT (into results/mechanism/<protocol>/nta_lnmr/)
+Writes, into results/mechanism/<protocol>/nta_lnmr/:
   tab_nta_lnmr_<P>.tex   LaTeX table (methods grouped, rows = tau)
   _nta_lnmr_<P>.csv      tidy values behind the table
-
-CONFIG: block below. Reads the same raw_fold_results.csv used by the figure.
 """
 
 from __future__ import annotations
@@ -91,10 +85,7 @@ def _boot_ci(values):
 
 def build(protocol: str):
     raw = _raw_fold(protocol).copy()
-    # third-class residual, computed PER FOLD so its CI is bootstrapped directly
-    # (not derived arithmetically from the NTA and LNMR means). This is the rate
-    # at which a flipped sample is predicted as neither its true nor its assigned
-    # noisy label.
+    # Third-class residual, computed per fold so its CI is bootstrapped directly
     raw["residual"] = 1.0 - raw["nta"] - raw["lnmr"]
     rows = []
     for method in CFG.METHODS:
@@ -112,8 +103,7 @@ def build(protocol: str):
 
 
 def _cell(df, metric, method, tau, best_method):
-    """A \\makecell value-over-CI cell; bold if this method is best at (metric,tau).
-    'best' = highest NTA, or LOWEST LNMR (low memorization is better)."""
+    """A \\makecell value-over-CI cell; bold if this method is best at (metric, tau)."""
     r = df[(df.method == method) & (np.isclose(df.tau, tau))]
     if r.empty or np.isnan(r[metric].values[0]):
         return r"\makecell{--}"
@@ -153,7 +143,7 @@ def emit_table(df: pd.DataFrame, protocol: str):
     nM = len(methods)
     outdir = _out(protocol)
 
-    # ---- Table 1: NTA + LNMR (two blocks) ----------------------------------
+    # Table 1: NTA + LNMR (two blocks)
     rows = _value_block_rows(df, [("nta", False), ("lnmr", True)])
     colspec = "l" + ("*{%d}{c}" % nM) * 2
     header_group = (r" & \multicolumn{%d}{c}{NTA (recovered to true)} "
@@ -186,7 +176,7 @@ def emit_table(df: pd.DataFrame, protocol: str):
     fp1.write_text("\n".join(tex1) + "\n")
     print(f"[tab] wrote {fp1}")
 
-    # ---- Table 2: residual only --------------------------------------------
+    # Table 2: residual only
     rows_r = _value_block_rows(df, [("residual", None)])
     colspec_r = "l" + "*{%d}{c}" % nM
     header_r = r"$\tau$ & " + " & ".join(mlabels) + r" \\"

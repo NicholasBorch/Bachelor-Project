@@ -1,4 +1,5 @@
-"""Plot per-epoch and per-class noise-label diagnostics from the main experiment.
+"""
+Plot per-epoch and per-class noise-label diagnostics from the main experiment.
 
 Reads two sources:
   - training_log.jsonl per job: extracts per-epoch `train_diagnostics` blocks
@@ -44,11 +45,11 @@ from pathlib import Path
 from typing import Any
 
 import matplotlib
-matplotlib.use("Agg")  # noqa: E402
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
+matplotlib.use("Agg")  
+import matplotlib.pyplot as plt  
+import numpy as np  
 
-from src.utils.io import ensure_dir, project_root  # noqa: E402
+from src.utils.io import ensure_dir, project_root  
 
 logger = logging.getLogger(__name__)
 
@@ -102,9 +103,7 @@ def _job_dir(
     )
 
 
-# ============================================================================
 # Per-epoch scalar NTA / LNMR curves
-# ============================================================================
 
 def _collect_per_epoch_diagnostics(
     base: Path, methods, dataset, init, optim, taus, folds,
@@ -277,18 +276,12 @@ def _plot_combined_curves(
     return n_written
 
 
-# ============================================================================
 # End-of-training per-class heatmaps
-# ============================================================================
 
 def _collect_per_class_eot(
     base: Path, methods, dataset, init, optim, taus, folds,
 ) -> dict:
-    """Returns: {(method, conditioning, metric): np.ndarray of shape (num_taus, num_classes)}
-    where each cell is the mean across folds (NaN if missing).
-
-    conditioning in {"by_clean", "by_noisy"}; metric in {"nta", "lnmr"}.
-    """
+    """Per-class end-of-training means: {(method, cond, metric): array (num_taus, num_classes)}."""
     out: dict = {}
     num_classes = len(CLASS_NAMES)
     for method in methods:
@@ -374,9 +367,7 @@ def _plot_per_class_heatmaps(
     return n_written
 
 
-# ============================================================================
 # Main
-# ============================================================================
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(

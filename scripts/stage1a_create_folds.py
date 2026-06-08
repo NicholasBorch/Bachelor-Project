@@ -1,12 +1,8 @@
-"""Stage 1a: create stratified 10-fold assignments for a dataset.
+"""
+Stage 1a: create stratified 10-fold assignments for a dataset.
 
-Run: python -m scripts.stage1a_create_folds --dataset {balanced,imbalanced}
-
-Output: data/processed/HAM10000/cv_folds/{dataset}/fold_assignments.csv
-        with columns [image_id, dx, fold].
-
-This must be run BEFORE stages 1b, 1c, 2, 3. Fold assignments are the single
-source of truth consumed by every downstream stage.
+Writes data/processed/.../cv_folds/{dataset}/fold_assignments.csv with columns
+[image_id, dx, fold]. Must run before stages 1b, 1c, 2, 3.
 """
 from __future__ import annotations
 

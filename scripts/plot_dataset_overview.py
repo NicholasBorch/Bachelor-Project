@@ -1,31 +1,14 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Dataset overview figures for the Methods/Data section.
 
-Produces TWO figures from the HAM10000 metadata (and image files), both styled to
-match the label-composition plot (same serif font, same teal bar colour #1F7A8C):
+Produces two figures from the HAM10000 metadata, styled to match the
+label-composition plot (same serif font, same teal bars):
 
-  1. class_examples.(pdf|png)
-       One randomly chosen example image per diagnostic class, in a single row,
-       each panel titled with the class code and full name. The reference figure
-       to point at when the seven classes are introduced. Selection is seeded.
+  1. class_examples: one seeded example image per diagnostic class, in a row.
+  2. data_distribution_dedup: per-class counts after lesion-level
+     deduplication, annotated with count and percentage.
 
-  2. data_distribution_dedup.(pdf|png)
-       The per-class sample count AFTER lesion-level deduplication (one image per
-       unique lesion_id, chosen with the same seed used throughout the thesis).
-       Bars are the composition plot's teal (#1F7A8C); each bar is annotated with
-       its count and percentage. This is the deduplicated companion to the raw
-       distribution figure.
-
-Both the dedup selection and the example-image selection use SEED = 10.
-
-============================================================================
-EDIT ONLY THE CONFIG BLOCK.
-============================================================================
-The script needs the HAM10000 metadata CSV (lesion_id + dx columns) and, for the
-montage, the image directory/directories. Standard Kaggle layout has the images
-split across HAM10000_images_part_1 and _part_2; both are searched.
+Both selections use SEED = 10.
 """
 
 from __future__ import annotations
@@ -42,32 +25,27 @@ import matplotlib.pyplot as plt
 from matplotlib.image import imread
 
 
-# ============================================================================
-# CONFIG
-# ============================================================================
+# Config
 @dataclass
 class Config:
-    # ---- inputs ------------------------------------------------------------
-    # HAM10000 metadata: must contain a lesion id column and a diagnosis column.
+    # Inputs
+    # HAM10000 metadata: lesion id + diagnosis columns
     METADATA_CSV: Path = Path("./data/raw/HAM10000/HAM10000_metadata.csv")
     LESION_ID_COL: str = "lesion_id"
     IMAGE_ID_COL: str = "image_id"
     DX_COL: str = "dx"
 
-    # Directories searched (recursively) for "<image_id>.jpg". The standard
-    # Kaggle download splits images across two folders; list as many as needed.
+    # Directories searched (recursively) for "<image_id>.jpg".
     IMAGE_DIRS: tuple = (
         Path("./data/raw/HAM10000/HAM10000_images_part_1"),
         Path("./data/raw/HAM10000/HAM10000_images_part_2"),
     )
     IMAGE_EXT: str = ".jpg"
 
-    # ---- seed (same as the rest of the thesis) -----------------------------
+    # Seed (same as the rest of the thesis)
     SEED: int = 10
 
-    # ---- classes -----------------------------------------------------------
-    # Canonical order and full names. The distribution plot orders by prevalence;
-    # the montage uses this listed order.
+    # Classes (canonical order and full names)
     CLASS_NAMES: dict = field(default_factory=lambda: {
         "nv":    "Melanocytic nevi",
         "mel":   "Melanoma",
@@ -77,18 +55,17 @@ class Config:
         "vasc":  "Vascular lesions",
         "df":    "Dermatofibroma",
     })
-    # order the montage panels by prevalence (largest first) to match the
-    # distribution plot's left-to-right order; set False to use the dict order.
+    # Order montage panels by prevalence (largest first); False uses dict order.
     MONTAGE_ORDER_BY_PREVALENCE: bool = True
 
-    # ---- styling (matched to plot_label_composition.py) --------------------
+    # Styling (matched to plot_label_composition.py)
     BAR_COLOR: str = "#1F7A8C"     # composition plot's TRUE_COLOR (teal/blue)
     BAR_ALPHA: float = 0.95
     BAR_EDGE: str = "white"
     BAR_EDGE_LW: float = 0.5
     BAR_TEXT_COLOR: str = "#1F7A8C"
 
-    # ---- output ------------------------------------------------------------
+    # Output
     OUT_DIR: Path = Path("./results/dataset_overview")
     EXAMPLES_STEM: str = "class_examples"
     DIST_STEM: str = "data_distribution_dedup"
@@ -100,9 +77,7 @@ class Config:
 CFG = Config()
 
 
-# ============================================================================
-# styling (identical block to plot_label_composition.py::_style)
-# ============================================================================
+# Styling (identical block to plot_label_composition.py::_style)
 def _style():
     plt.rcParams.update({
         "font.family":        "serif",
@@ -134,9 +109,7 @@ def _save(fig, stem: str):
     print(f"[fig] wrote {CFG.OUT_DIR / stem}.(pdf|png)")
 
 
-# ============================================================================
-# data
-# ============================================================================
+# Data
 def _load_metadata() -> pd.DataFrame:
     if not CFG.METADATA_CSV.exists():
         raise FileNotFoundError(f"metadata CSV not found: {CFG.METADATA_CSV}")
@@ -149,11 +122,9 @@ def _load_metadata() -> pd.DataFrame:
 
 
 def _deduplicate(df: pd.DataFrame) -> pd.DataFrame:
-    """One row per unique lesion_id, chosen uniformly at random with SEED.
-    Mirrors the thesis deduplication (one image per lesion)."""
+    """One row per unique lesion_id, chosen at random with SEED."""
     rng = np.random.default_rng(CFG.SEED)
-    # sample(frac=1) with a fixed seed shuffles deterministically, then take the
-    # first row per lesion_id -> a uniform random pick per lesion.
+    # Deterministic shuffle, then first row per lesion_id = uniform pick.
     shuffled = df.sample(frac=1.0, random_state=CFG.SEED).reset_index(drop=True)
     dedup = shuffled.drop_duplicates(subset=[CFG.LESION_ID_COL], keep="first")
     return dedup.reset_index(drop=True)
@@ -179,8 +150,7 @@ def _find_image(image_id: str) -> Path | None:
 
 
 def _pick_example_per_class(df: pd.DataFrame, order: list[str]) -> dict:
-    """One random image_id per class (seeded), resolved to a file path.
-    Picks from the FULL metadata (not deduplicated) so any image is eligible."""
+    """One random image_id per class (seeded), resolved to a file path."""
     rng = np.random.default_rng(CFG.SEED)
     picks = {}
     for cls in order:
@@ -203,9 +173,7 @@ def _pick_example_per_class(df: pd.DataFrame, order: list[str]) -> dict:
     return picks
 
 
-# ============================================================================
-# figure 1: one example image per class
-# ============================================================================
+# Figure 1: one example image per class
 def fig_class_examples(df: pd.DataFrame, order: list[str]):
     _style()
     picks = _pick_example_per_class(df, order)
@@ -238,9 +206,7 @@ def fig_class_examples(df: pd.DataFrame, order: list[str]):
     _save(fig, CFG.EXAMPLES_STEM)
 
 
-# ============================================================================
-# figure 2: deduplicated class distribution
-# ============================================================================
+# Figure 2: deduplicated class distribution
 def fig_distribution(counts: pd.Series):
     _style()
     order = list(counts.sort_values(ascending=False).index)
@@ -271,9 +237,7 @@ def fig_distribution(counts: pd.Series):
     _save(fig, CFG.DIST_STEM)
 
 
-# ============================================================================
-# main
-# ============================================================================
+# Main
 def main():
     print(f"Loading metadata from {CFG.METADATA_CSV} ...")
     meta = _load_metadata()

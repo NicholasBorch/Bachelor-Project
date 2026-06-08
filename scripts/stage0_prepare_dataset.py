@@ -1,11 +1,9 @@
-"""Stage 0: Dataset preparation.
+"""
+Stage 0: dataset preparation.
 
-Single-shot script. Reads the raw Kaggle HAM10000 download, performs
-one-image-per-lesion deduplication, copies selected images to
-data/processed/HAM10000/one_image_per_lesion/images/, and creates both the
-deduplicated metadata CSV and the balanced-subset metadata CSV.
-
-Run: python -m scripts.stage0_prepare_dataset
+Reads the raw Kaggle HAM10000 download, deduplicates to one image per lesion,
+copies the selected images to data/processed/.../images/, and writes the
+deduplicated and balanced-subset metadata CSVs.
 """
 from __future__ import annotations
 
@@ -35,9 +33,7 @@ def deduplicate_one_image_per_lesion(
     raw_metadata: pd.DataFrame,
     seed: int = 10,
 ) -> pd.DataFrame:
-    """For each unique lesion_id, select one image at random (seed=10 per
-    project documentation §3.1). Returns the deduplicated metadata DataFrame.
-    """
+    """For each unique lesion_id, select one image at random."""
     rng = random.Random(seed)
     rows = []
     for lesion_id, group in raw_metadata.groupby("lesion_id"):
@@ -50,7 +46,7 @@ def create_balanced_subset(
     metadata: pd.DataFrame,
     seed: int = 10,
 ) -> pd.DataFrame:
-    """Downsample each class to the minimum class count (typically 73 for df)."""
+    """Downsample each class to the minimum class count."""
     min_count = metadata["dx"].value_counts().min()
     rng = random.Random(seed)
     pieces = []

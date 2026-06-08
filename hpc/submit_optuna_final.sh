@@ -1,42 +1,17 @@
 #!/bin/bash
-# hpc/submit_optuna_final.sh
+# Submit the final Optuna hyperparameter search for ELR, SCE, and AsyCo+DivMix.
 #
-# Submit the FINAL Optuna hyperparameter search for ELR, SCE, and AsyCo+DivMix.
+# Three method chains run in parallel; within each chain the chunks are
+# sequential via bsub -w ended(JOBID). 7 jobs total (ELR 2x50, SCE 2x50,
+# AsyCo 34+33+33), 150 epochs/trial, tuning fold 5, train tau=0.2, clean
+# validation labels.
 #
-# Topology: three method "chains" run in parallel; within each chain jobs are
-# strictly sequential via bsub -w "ended(JOBID)" dependencies.
+# Outputs: results/optuna_final/{method}/imbalanced/adam_resnet34_pretrained/tau_20/fold_05/
 #
-# Total: 7 jobs. Submission order (matches user spec):
-#   1. AsyCo chunk 1 (no dependency)
-#   2. SCE   chunk 1 (no dependency)
-#   3. ELR   chunk 1 (no dependency)
-#   4. AsyCo chunk 2 (depends on AsyCo chunk 1)
-#   5. SCE   chunk 2 (depends on SCE chunk 1)
-#   6. ELR   chunk 2 (depends on ELR chunk 1)
-#   7. AsyCo chunk 3 (depends on AsyCo chunk 2)
-#
-# Trial counts per method:
-#   ELR:   50 + 50 = 100 trials
-#   SCE:   50 + 50 = 100 trials
-#   AsyCo: 34 + 33 + 33 = 100 trials
-#
-# Per-trial budget: 150 epochs. With proper pruning ~50% of trials are killed
-# at epoch 30, so realistic walltime per chunk:
-#   ELR ~14h    SCE ~14h    AsyCo ~17h
-# All fit comfortably in 23:59 walltime.
-#
-# Tuning fold: 5 (deterministic from random.Random(10).randint(0, 9))
-# Training noise: tau=0.2 (noisy training labels)
-# Validation labels: clean (loaded from tau=0.0 fold by image_id matching)
-#
-# Outputs:
-#   results/optuna_final/{method}/imbalanced/adam_resnet34_pretrained/tau_20/fold_05/
-#   logs/optuna_final/optuna_final_{method}_fold5_jN.{out,err}
-#
-# After all jobs finish:
-#   python -m scripts.optuna_analyze_final --method elr          --fold 5
-#   python -m scripts.optuna_analyze_final --method sce          --fold 5
-#   python -m scripts.optuna_analyze_final --method asyco_divmix --fold 5
+# After all jobs finish, analyze with:
+#   python -m scripts.stage2_tune_analyze --method elr          --fold 5
+#   python -m scripts.stage2_tune_analyze --method sce          --fold 5
+#   python -m scripts.stage2_tune_analyze --method asyco_divmix --fold 5
 
 set -euo pipefail
 
@@ -97,7 +72,7 @@ submit_chunk() {
         -o "${log_stem}.out" \
         -e "${log_stem}.err" \
         "source ${VENV}/bin/activate && export PYTHONUNBUFFERED=1 && \
-         python -m scripts.optuna_search_final \
+         python -m scripts.stage2_tune_search \
             --method ${method} \
             --dataset ${DATASET} \
             --optim ${OPTIM} \
@@ -154,6 +129,6 @@ echo >&2
 echo "Monitor:   bjobs -w | grep ${JOB_PREFIX}" >&2
 echo >&2
 echo "After completion, analyze with:" >&2
-echo "    python -m scripts.optuna_analyze_final --method elr          --fold ${FOLD}" >&2
-echo "    python -m scripts.optuna_analyze_final --method sce          --fold ${FOLD}" >&2
-echo "    python -m scripts.optuna_analyze_final --method asyco_divmix --fold ${FOLD}" >&2
+echo "    python -m scripts.stage2_tune_analyze --method elr          --fold ${FOLD}" >&2
+echo "    python -m scripts.stage2_tune_analyze --method sce          --fold ${FOLD}" >&2
+echo "    python -m scripts.stage2_tune_analyze --method asyco_divmix --fold ${FOLD}" >&2

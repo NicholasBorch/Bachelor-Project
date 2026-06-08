@@ -1,41 +1,11 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-thesis_paired_stats.py
-======================
-One statistics module shared by all three Results scripts (RQ1 human comparison,
-Results.2 baseline degradation, Results.3 method comparison) so the whole thesis
-uses identical machinery. Everything operates on a single per-fold paired
-difference vector d (length n = number of folds), where
+Shared paired-statistics machinery for the Results scripts.
 
-    d_k = score_A(fold k) - score_B(fold k)
-
-and the test asks whether d is centred away from zero.
-
-For every (cell) it returns, on the SAME d:
-
-  delta            mean(d)                              effect size (raw units)
-  delta_ci_lo/hi   bootstrap CI of mean(d)              effect-size uncertainty
-  W, p_wilcoxon    exact paired Wilcoxon signed-rank    primary significance test
-  p_perm           exact paired sign-flip permutation   confirmatory (assumption-light)
-  r_rb             matched-pairs rank-biserial          standardized effect size
-  direction        +1 / -1 / 0  (sign of delta)         "better" vs "worse"
-
-Holm correction and a Wilcoxon-vs-permutation concordance flag are applied at the
-family level by `holm` and `add_holm_and_flags`.
-
-Design notes baked in:
-  * n is small (typically 10). Wilcoxon and permutation are computed EXACTLY
-    (full enumeration for permutation when n <= PERM_EXACT_MAX, else sampled).
-    At n=10 the smallest two-sided p for either test is 2/1024 ~= 0.00195; this
-    is the floor, not an artifact.
-  * The bootstrap resamples the DIFFERENCES (pairing preserved). It is an
-    effect-size tool, not a third significance test.
-  * Direction is carried everywhere so "significantly worse" (delta<0) is
-    reported distinctly from "significantly better" (delta>0).
-
-This module has no project dependencies (only numpy/scipy) so all three scripts
-can import it regardless of their own package layout.
+Everything operates on one per-fold paired difference vector d = score_A - score_B
+and reports, on the same d: mean delta with a bootstrap CI, the exact paired
+Wilcoxon signed-rank test, an exact sign-flip permutation p, the matched-pairs
+rank-biserial effect size, and a direction. Holm correction and a
+Wilcoxon/permutation concordance flag are applied at the family level.
 """
 
 from __future__ import annotations
@@ -56,9 +26,7 @@ SIG_LEVELS = ((0.001, "***"), (0.01, "**"), (0.05, "*"))
 NS_SYMBOL = "n.s."
 
 
-# ---------------------------------------------------------------------------
 # result container
-# ---------------------------------------------------------------------------
 @dataclass
 class PairedResult:
     n: int
@@ -77,25 +45,20 @@ class PairedResult:
         return asdict(self)
 
 
-# ---------------------------------------------------------------------------
 # the four core computations, all on one difference vector d
-# ---------------------------------------------------------------------------
 def _clean(d) -> np.ndarray:
     d = np.asarray(d, dtype=float)
     return d[~np.isnan(d)]
 
 
 def wilcoxon_exact(d) -> tuple[float, float]:
-    """Exact two-sided paired Wilcoxon signed-rank on differences d.
-    Returns (W, p). W is scipy's statistic (min of signed-rank sums)."""
+    """Exact two-sided paired Wilcoxon signed-rank on differences d; returns (W, p)."""
     d = _clean(d)
     n = d.size
     if n == 0:
         return (np.nan, np.nan)
     if np.allclose(d, 0.0):
         return (0.0, 1.0)
-    # scipy needs the two paired vectors or the differences; pass differences
-    # against zero via the one-sample form (x = d).
     try:
         res = stats.wilcoxon(d, alternative="two-sided", zero_method="wilcox",
                              correction=False, mode="exact")
@@ -109,9 +72,7 @@ def wilcoxon_exact(d) -> tuple[float, float]:
 
 
 def permutation_exact(d) -> tuple[float, bool]:
-    """Exact two-sided paired sign-flip permutation p on the MEAN of d.
-    Enumerates all 2^n sign assignments when n <= PERM_EXACT_MAX, else samples.
-    Returns (p, exact_flag)."""
+    """Two-sided sign-flip permutation p on mean(d), exact if n<=PERM_EXACT_MAX; returns (p, exact)."""
     d = _clean(d)
     n = d.size
     if n == 0:
@@ -134,8 +95,7 @@ def permutation_exact(d) -> tuple[float, bool]:
 
 
 def bootstrap_diff_ci(d, n_boot=10_000, alpha=0.05, seed=0) -> tuple[float, float]:
-    """Percentile bootstrap CI of mean(d): resample the differences with
-    replacement. Pairing is preserved because d is already the paired diff."""
+    """Percentile bootstrap CI of mean(d) by resampling the paired differences."""
     d = _clean(d)
     n = d.size
     if n == 0:
@@ -150,10 +110,7 @@ def bootstrap_diff_ci(d, n_boot=10_000, alpha=0.05, seed=0) -> tuple[float, floa
 
 
 def rank_biserial(d, W=None) -> float:
-    """Matched-pairs rank-biserial correlation as an effect size.
-    r = 1 - 4W / (n(n+1)); sign re-attached from the mean so it reads as
-    +1 (A>B unanimously) ... -1 (A<B unanimously). Excludes exact-zero diffs
-    from n, matching the signed-rank treatment."""
+    """Matched-pairs rank-biserial correlation as a signed effect size."""
     d = _clean(d)
     d = d[d != 0.0]
     n = d.size
@@ -166,9 +123,7 @@ def rank_biserial(d, W=None) -> float:
     return float(np.sign(d.mean()) * mag)
 
 
-# ---------------------------------------------------------------------------
 # one call computes everything for a single difference vector
-# ---------------------------------------------------------------------------
 def paired_compare(d, n_boot=10_000, boot_seed=0, alpha=0.05) -> PairedResult:
     """Run all four computations on one paired difference vector d."""
     d = _clean(d)
@@ -186,21 +141,16 @@ def paired_compare(d, n_boot=10_000, boot_seed=0, alpha=0.05) -> PairedResult:
 
 
 def paired_compare_AB(a, b, **kw) -> PairedResult:
-    """Convenience: difference two fold-aligned score vectors then compare.
-    a, b are per-fold scores for method A and B (or method/baseline); the
-    difference is a - b, so delta>0 means A scores higher."""
+    """Difference two fold-aligned score vectors (a - b) then compare."""
     a = np.asarray(a, float)
     b = np.asarray(b, float)
     m = ~(np.isnan(a) | np.isnan(b))
     return paired_compare(a[m] - b[m], **kw)
 
 
-# ---------------------------------------------------------------------------
 # multiplicity + reporting helpers (applied across a family)
-# ---------------------------------------------------------------------------
 def holm(pvals) -> list[float]:
-    """Holm step-down adjusted p-values, input order preserved. NaNs pass
-    through and are excluded from the family size."""
+    """Holm step-down adjusted p-values, input order preserved (NaNs excluded)."""
     p = list(pvals)
     idx = [i for i, v in enumerate(p) if v is not None and not np.isnan(v)]
     m = len(idx)
@@ -225,8 +175,7 @@ def sig_code(p, ns=NS_SYMBOL) -> str:
 
 
 def directional_code(p, direction, ns=NS_SYMBOL) -> str:
-    """Significance stars, but a leading sign communicates direction:
-    '+**' = significantly higher (A>B), '-**' = significantly lower (A<B)."""
+    """Significance stars prefixed with +/- to encode direction."""
     base = sig_code(p, ns=ns)
     if base == ns or direction == 0:
         return base
@@ -235,10 +184,7 @@ def directional_code(p, direction, ns=NS_SYMBOL) -> str:
 
 def add_holm_and_flags(results: list[dict], pkey_w="p_wilcoxon",
                        pkey_perm="p_perm", alpha=0.05) -> list[dict]:
-    """Given a family (list of per-cell dicts each carrying raw p_wilcoxon and
-    p_perm and a 'direction'), add Holm-corrected p for both tests, directional
-    significance codes, and a concordance flag where the two tests disagree on
-    significance at alpha. Mutates and returns the list."""
+    """Add Holm-corrected p, directional codes, and a Wilcoxon/permutation concordance flag to a family."""
     pw = holm([r[pkey_w] for r in results])
     pp = holm([r[pkey_perm] for r in results])
     for r, hw, hp in zip(results, pw, pp):
@@ -253,7 +199,6 @@ def add_holm_and_flags(results: list[dict], pkey_w="p_wilcoxon",
     return results
 
 
-# small floor reminder other scripts can print once
 def p_floor(n: int) -> float:
     """Smallest achievable two-sided p for the exact tests at sample size n."""
     return 2.0 / (2 ** n)

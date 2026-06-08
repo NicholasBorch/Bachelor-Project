@@ -1,3 +1,9 @@
+"""
+Plot clean-validation balanced-accuracy curves for the stage-2 fold-5 pilot.
+
+Compares tau=0.0 vs tau=0.2 for ELR and AsyCo+DivMix across optimizer and
+initialization, marking the best epoch on each curve.
+"""
 import json
 from pathlib import Path
 

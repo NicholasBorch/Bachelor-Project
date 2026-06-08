@@ -1,40 +1,12 @@
-"""Results.2: does label noise meaningfully degrade the baseline?
+"""
+Results.2 (gate analysis): does label noise degrade the baseline under the
+primary protocol (AP = pretrained + Adam)?
 
-This is the "gate" analysis. Before any noise-robust method is compared, it
-must be shown that the injected noise actually corrupts learning under the
-primary protocol; otherwise every downstream comparison is uninterpretable.
-
-Primary protocol: AP = ImageNet-pretrained backbone trained with Adam
-(init=pretrained, optim=adam), the clinically practical setting motivating the
-thesis. Only the BASELINE method is analyzed here; the noise-robust methods and
-the other three protocols are handled in Results.3-5.
-
-What it produces:
-    1. A single line figure of the baseline's three metrics (balanced accuracy,
-       macro F1, macro AUC) vs. tau, each with a 95% bootstrap CI band across
-       the ten folds and significance markers above each tau > 0 (paired
-       Wilcoxon vs. the clean tau = 0 condition, Holm-corrected across the five
-       noise rates).
-    2. A body table (BA and macro F1 per tau, mean +/- CI, Holm-corrected
-       p-value vs. clean).
-    3. An appendix table of the full per-fold scores (reproducibility).
-
-The statistical test reuses src.analysis.stats.wilcoxon_vs_clean (the per-method
-tau-vs-clean noise-sensitivity test defined for the thesis). That function
-returns RAW p-values; Holm correction across the five tau is applied here so the
-reported significance matches the multiple-comparison policy used elsewhere.
-
-Run:
-    python -m scripts.stage5_results2_baseline_degradation
-    python -m scripts.stage5_results2_baseline_degradation --dataset imbalanced
-    python -m scripts.stage5_results2_baseline_degradation --init pretrained --optim adam
-
-Outputs (new folder):
-    results/results2_baseline_degradation/{dataset}/{init}_{optim}/
-        baseline_metrics_per_fold.csv     # tidy: tau, fold, balanced_accuracy, macro_f1, macro_auc
-        baseline_summary.csv              # tau, metric, mean, ci_lo, ci_hi, p_holm, sig
-        baseline_degradation.png          # line plot: all 3 metrics vs tau
-        manifest .json (via write_manifest)
+Only the baseline method is analysed. For each tau, computes per-fold balanced
+accuracy / macro F1 / macro AUC, a paired Wilcoxon vs. the clean (tau=0)
+condition (Holm-corrected across noise rates), and bootstrap CIs. Writes a tidy
+per-fold CSV, a summary CSV, and a degradation line figure into
+results/baseline_degradation/{dataset}/{init}_{optim}/.
 """
 from __future__ import annotations
 
@@ -45,18 +17,15 @@ from pathlib import Path
 
 import matplotlib
 
-matplotlib.use("Agg")  # headless / HPC
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-# Thesis figure formatting convention: matplotlib's native serif (Palatino)
-# renderer, no LaTeX (keeps it HPC-safe). Falls back to DejaVu Serif if
-# Palatino isn't installed. Math symbols ($\tau$) use serif mathtext.
 plt.rcParams.update({
     "font.family":        "serif",
     "font.serif":         ["Palatino", "Palatino Linotype", "Book Antiqua", "DejaVu Serif"],
-    "mathtext.fontset":   "cm",      # serif math, e.g. $\tau$, matches body text
+    "mathtext.fontset":   "cm",      
     "axes.unicode_minus": False,
     "figure.dpi":         150,
     "savefig.dpi":        300,
@@ -80,8 +49,7 @@ _METRIC_LABELS = {
     "macro_auc": "Macro AUC",
 }
 
-# Shared 4-method color palette, reused across Results.2-5 so each method has
-# the SAME color in every figure. Colorblind-safe, qualitatively distinct.
+# Shared 4-method palette, reused across Results.2-5; colorblind-safe.
 _METHOD_COLORS = {
     "baseline":     "#9ec9e2",  # light blue, matched to Results.3 palette
     "sce":          "#1b9e77",  # teal-green
@@ -95,9 +63,7 @@ _METHOD_LABELS = {
     "asyco_divmix": "AsyCo",
 }
 
-# Display labels for the protocol shown in figure titles. The underlying
-# protocol string ("{init}_{optim}", e.g. "pretrained_adam") is kept unchanged
-# for paths, CSV columns, and the manifest; only the title uses these.
+# Display labels for protocol titles only; the {init}_{optim} string is unchanged.
 _PROTOCOL_LABELS = {
     "pretrained_adam": "Protocol AP",
     "pretrained_sgd":  "Protocol SP",
@@ -121,20 +87,9 @@ def _fold_dirname(fold: int) -> str:
 def _metrics_path(
     root: Path, method: str, dataset: str, init: str, optim: str, tau: float, fold: int
 ) -> Path:
-    """Mirror the main-experiment output tree.
-
-    The HPC submission writes each protocol into its own top-level grouping
-    directory, so the protocol appears twice in the path: once right after
-    ``main_experiment/`` (the per-protocol job tree) and once in the
-    ``{init}_{optim}`` position. Concretely::
-
-        results/main_experiment/{init}_{optim}/training/
-            {method}/{dataset}/{init}_{optim}/tau_NN/fold_NN/test_metrics.json
-    """
+    """Path to one job's test_metrics.json in the per-protocol main-experiment tree."""
     protocol = f"{init}_{optim}"
-    # Real tree: results/main_experiment/{protocol}/training/{method}/
-    #     tau_NN/fold_NN/test_metrics.json  (no {dataset} level; protocol once).
-    # `dataset` kept in the signature for call-site compatibility only.
+    # Tree: results/main_experiment/{protocol}/training/{method}/tau_NN/fold_NN/
     return (
         root / "results" / "main_experiment" / protocol / "training"
         / method
@@ -142,16 +97,10 @@ def _metrics_path(
     )
 
 
-# ──────────────────────────────────────────────────────────────────────────
 # Data loading
-# ──────────────────────────────────────────────────────────────────────────
 def _protocol_root(root: Path, method: str, dataset: str, init: str, optim: str) -> Path:
-    """Directory that contains the tau_NN/fold_NN tree for one (method, protocol).
-
-        results/main_experiment/{init}_{optim}/training/{method}/{dataset}/{init}_{optim}/
-    """
+    """Directory containing the tau_NN/fold_NN tree for one (method, protocol)."""
     protocol = f"{init}_{optim}"
-    # Real tree: results/main_experiment/{protocol}/training/{method}/
     return (
         root / "results" / "main_experiment" / protocol / "training"
         / method
@@ -161,18 +110,7 @@ def _protocol_root(root: Path, method: str, dataset: str, init: str, optim: str)
 def _load_baseline_long(
     root: Path, dataset: str, init: str, optim: str, taus: list[float], n_folds: int
 ) -> pd.DataFrame:
-    """Collect baseline per-fold scalar metrics into a tidy long DataFrame.
-
-    Columns: dataset, init, optim, method, tau, fold,
-             balanced_accuracy, macro_f1, macro_auc
-
-    Folds and tau directories are DISCOVERED by globbing the protocol tree
-    rather than generated from ``range(n_folds)``. This makes the loader
-    agnostic to fold numbering (the runs use 1-indexed ``fold_01..fold_10``,
-    not 0-indexed) and tolerant of a partially-complete grid. ``taus`` is used
-    only to keep the noise-rate ordering consistent with the config; any tau
-    found on disk that is also in the config is loaded.
-    """
+    """Collect baseline per-fold scalar metrics into a tidy long DataFrame."""
     proto_dir = _protocol_root(root, _BASELINE, dataset, init, optim)
     if not proto_dir.exists():
         raise FileNotFoundError(
@@ -189,8 +127,7 @@ def _load_baseline_long(
             "(searched tau_*/fold_*/). Check that runs have completed."
         )
 
-    # Build a lookup from tau-dirname -> float tau, restricted to config taus
-    # so a stray directory cannot inject an unexpected noise rate.
+    # Map tau-dirname -> float tau, restricted to config taus.
     taudir_to_tau = {_tau_dirname(t): float(t) for t in taus}
 
     for path in found_paths:
@@ -220,8 +157,7 @@ def _load_baseline_long(
 
     df = pd.DataFrame(rows)
 
-    # Report any (tau, fold) gaps relative to what is present, so a partial
-    # grid is visible without crashing.
+    # Report per-tau fold counts so a partial grid is visible.
     n_per_tau = df.groupby("tau")["fold"].nunique()
     folds_seen = sorted(df["fold"].unique())
     print(f"[results2] {dataset}/{init}_{optim}: loaded {len(df)} files; "
@@ -231,14 +167,9 @@ def _load_baseline_long(
     return df
 
 
-# ──────────────────────────────────────────────────────────────────────────
 # Statistics
-# ──────────────────────────────────────────────────────────────────────────
 def _holm(pvals: list[float]) -> list[float]:
-    """Holm-Bonferroni adjusted p-values, preserving input order.
-
-    NaN p-values pass through unchanged and are excluded from the family size.
-    """
+    """Holm-Bonferroni adjusted p-values, preserving input order (NaNs excluded)."""
     idx_valid = [i for i, p in enumerate(pvals) if not (p is None or np.isnan(p))]
     m = len(idx_valid)
     adj = [float("nan")] * len(pvals)
@@ -271,19 +202,11 @@ def _build_summary(
     n_bootstrap: int,
     boot_seed: int,
 ) -> pd.DataFrame:
-    """Per-tau mean + bootstrap CI per metric, plus Holm-corrected vs.-clean p.
-
-    The vs.-clean Wilcoxon (tau > 0 against tau = 0) is computed with the
-    thesis helper, then Holm-corrected across the five noise rates per metric.
-    """
+    """Per-tau mean + bootstrap CI per metric, plus Holm-corrected vs-clean p."""
     all_metrics = list(_PRIMARY_METRICS) + [_SUPPORTING_METRIC]
     summary_rows: list[dict] = []
 
-    # vs-clean test via the shared thesis statistics module: each tau>0 vs the
-    # clean (tau=0) condition by fold, with exact Wilcoxon + exact permutation +
-    # bootstrap CI on the paired difference + rank-biserial r, directional Holm,
-    # and a concordance flag. diff = noisy - clean, so degradation has
-    # direction = -1 and prints "-*", "-**", ... (significantly WORSE than clean).
+    # vs-clean test (diff = noisy - clean): paired Wilcoxon + permutation + bootstrap CI, directional Holm.
     holm_lookup: dict[tuple[str, float], tuple[float, str]] = {}
     extra_lookup: dict[tuple[str, float], dict] = {}
     taus_nz = [t for t in taus if not np.isclose(t, 0.0)]
@@ -335,10 +258,8 @@ def _build_summary(
     return pd.DataFrame(summary_rows)
 
 
-# ──────────────────────────────────────────────────────────────────────────
-# Plot: line plot of all three metrics degrading under increasing noise
-# ──────────────────────────────────────────────────────────────────────────
-# Per-metric line colours. Colourblind-safe, qualitatively distinct (Okabe-Ito).
+# Plot: all three metrics degrading under increasing noise
+# Per-metric line colours. Colourblind-safe, qualitatively distinct
 _METRIC_LINE_COLORS = {
     "balanced_accuracy": "#0072B2",  # blue
     "macro_f1":          "#D55E00",  # vermillion
@@ -352,8 +273,7 @@ _METRIC_MARKERS = {
 
 
 def _metric_curve(ax, sub: pd.DataFrame, metric: str) -> None:
-    """Plot one metric's mean-vs-tau line with a shaded bootstrap CI band and
-    significance codes above each tau > 0 point."""
+    """Plot one metric's mean-vs-tau line with a bootstrap CI band and significance codes."""
     sub = sub.sort_values("tau")
     taus = sub["tau"].to_numpy()
     means = sub["mean"].to_numpy()
@@ -404,8 +324,7 @@ def _plot_degradation(
     ax.set_xlim(0.0, max(taus_present) + 0.02)
     ax.spines["left"].set_position(("data", 0.0))
 
-    # Y-axis ticks at fixed 0.1 intervals from 0.1 to 1.0, but the axis bottom
-    # stays at 0 so nothing is clipped.
+    # Y ticks at 0.1 intervals; axis bottom stays at 0.
     ax.set_yticks(np.arange(0.1, 1.0 + 1e-9, 0.1))
     ax.set_ylim(0.0, 1.0)
 
@@ -424,9 +343,7 @@ def _plot_degradation(
     plt.close(fig)
 
 
-# ──────────────────────────────────────────────────────────────────────────
 # Main
-# ──────────────────────────────────────────────────────────────────────────
 def _run(
     dataset: str, init: str, optim: str, n_bootstrap: int, boot_seed: int
 ) -> dict:
@@ -437,7 +354,7 @@ def _run(
     protocol = f"{init}_{optim}"
 
     out_dir = ensure_dir(
-        root / cfg["paths"]["results"] / "results2_baseline_degradation"
+        root / cfg["paths"]["results"] / "baseline_degradation"
         / dataset / protocol
     )
 
@@ -452,7 +369,7 @@ def _run(
     fig_path = out_dir / "baseline_degradation.png"
     _plot_degradation(summary, taus, fig_path, protocol)
 
-    # Console summary: where does degradation become significant?
+    # console summary
     print(f"\n[results2] === {dataset} / {protocol}: baseline vs. clean (Holm) ===")
     for metric in _PRIMARY_METRICS:
         sub = summary[summary["metric"] == metric].sort_values("tau")

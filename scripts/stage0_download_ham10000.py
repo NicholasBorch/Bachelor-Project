@@ -1,29 +1,9 @@
-"""Download HAM10000 from Kaggle into ``data/raw/HAM10000/``.
+"""
+Download HAM10000 from Kaggle into data/raw/HAM10000/ (metadata CSV + two image dirs).
 
-Headless alternative to the notebook ``notebooks/HAM10000_data_loader.ipynb``.
-Use this on HPC or anywhere a notebook would be awkward.
-
-Layout produced (what Stage 0 expects)::
-
-    data/raw/HAM10000/
-    ├── HAM10000_metadata.csv
-    ├── HAM10000_images_part_1/   *.jpg
-    └── HAM10000_images_part_2/   *.jpg
-
-Prerequisites:
-    1. A Kaggle account.
-    2. An API token file at ``~/.kaggle/kaggle.json`` with permissions 600.
-       Create one via Kaggle -> Account -> "Create New API Token".
-
-Run:
-    python -m scripts.stage0_download_ham10000
-
-Idempotent: if the expected files already exist under ``data/raw/HAM10000``,
-the script does nothing and exits 0. Pass ``--force`` to re-download.
-
-This script only populates ``data/raw``. After it finishes, run
-``python -m scripts.stage0_prepare_dataset`` to deduplicate and build the
-balanced subset.
+Alternative to notebooks/HAM10000_data_loader.ipynb. Reads Kaggle
+credentials from ~/.kaggle/kaggle.json. Idempotent: skips if the expected files
+already exist unless --force. Run stage0_prepare_dataset next.
 """
 from __future__ import annotations
 
@@ -37,7 +17,7 @@ from src.utils.io import load_config, project_root
 
 KAGGLE_DATASET = "kmader/skin-cancer-mnist-ham10000"
 
-# Files Stage 0 reads. If all of these exist under data/raw/HAM10000/, we're done.
+# Files Stage 0 reads.
 EXPECTED_METADATA = "HAM10000_metadata.csv"
 EXPECTED_IMAGE_DIRS = ("HAM10000_images_part_1", "HAM10000_images_part_2")
 
@@ -54,24 +34,14 @@ def _already_present(raw_dir: Path) -> bool:
 
 
 def _find_in_download(src_root: Path, name: str) -> Path | None:
-    """Locate ``name`` (file or directory) anywhere in the Kaggle cache tree.
-
-    kagglehub sometimes places things a level deep depending on the dataset.
-    We walk the tree to find the canonical artifacts by name.
-    """
+    """Locate name (file or directory) anywhere in the Kaggle cache tree."""
     for candidate in src_root.rglob(name):
         return candidate
     return None
 
 
 def _link_or_copy(src: Path, dst: Path) -> None:
-    """Prefer a symlink (fast, no disk cost); fall back to copy on failure.
-
-    On HPC the kagglehub cache typically lives under ``~/.cache/kagglehub/``
-    — that is on home, not on work3. Symlinking keeps ``data/raw`` small
-    while still letting Stage 0 read the files transparently. If the
-    symlink fails (e.g. cross-filesystem restriction or Windows), we copy.
-    """
+    """Symlink src into dst, falling back to a copy if symlinking fails."""
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dst.exists() or dst.is_symlink():
         dst.unlink() if dst.is_symlink() else shutil.rmtree(dst) if dst.is_dir() else dst.unlink()
@@ -106,14 +76,12 @@ def main(args: argparse.Namespace) -> int:
         print("[stage0-download] Pass --force to re-download.")
         return 0
 
-    # kagglehub reads credentials from ~/.kaggle/kaggle.json automatically.
-    # If they're missing it will raise a clear error — we just let it bubble up.
     print(f"[stage0-download] downloading {KAGGLE_DATASET} via kagglehub...")
     print("[stage0-download] (first-time downloads are ~3 GB and can take a while)")
     download_path = Path(kagglehub.dataset_download(KAGGLE_DATASET))
     print(f"[stage0-download] kagglehub cache: {download_path}")
 
-    # Locate the artifacts inside the cache. kagglehub layouts vary; search by name.
+    # Locate the artifacts inside the cache.
     metadata_src = _find_in_download(download_path, EXPECTED_METADATA)
     if metadata_src is None:
         print(

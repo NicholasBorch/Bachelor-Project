@@ -1,29 +1,15 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Results.5 - memorization dynamics over training (per-epoch NTA / LNMR).
 
-Reads the per-epoch diagnostics logged in each fold's training_log.jsonl
-(under the "train_diagnostics" record, populated at a handful of checkpoint
-epochs) and produces:
+Reads the per-epoch train_diagnostics logged in each fold's training_log.jsonl
+(at checkpoint epochs) and writes, under epoch_trajectory/:
+  nta_lnmr_epochs_<P>_tau20.(pdf|png)   single-tau (0.20) NTA/LNMR vs epoch, CI bands.
+  grid_nta_epochs_<P>.(pdf|png)         small-multiples (panels = tau) NTA vs epoch.
+  grid_lnmr_epochs_<P>.(pdf|png)        same for LNMR.
+  _epoch_trajectory_<P>.csv             tidy per (method, tau, epoch) means + CIs.
 
-  epoch_trajectory/
-    nta_lnmr_epochs_<P>_tau20.(pdf|png)   single-tau (0.20) two-panel figure,
-                                          NTA and LNMR vs epoch, one line per
-                                          method, 95% bootstrap CI bands.
-    grid_nta_epochs_<P>.(pdf|png)         small-multiples: panels = tau,
-                                          lines = method, NTA vs epoch.
-    grid_lnmr_epochs_<P>.(pdf|png)        same for LNMR.
-    _epoch_trajectory_<P>.csv             tidy per (method, tau, epoch) means+CIs.
-
-DESCRIPTIVE. The only inferential element is the 95% bootstrap CI (folds),
-matching the rest of Part 5. No significance tests.
-
-NOTE on epoch 0: it is essentially the untrained model, so NTA and LNMR are
-near chance and should NOT be read as "resistance". The single-tau figure
-annotates this; the grids start the line at epoch 0 but the caption flags it.
-
-CONFIG: block below. Protocol selection by (init, optim) -> folder.
+Descriptive; the only inferential element is the 95% bootstrap CI over folds.
+Epoch 0 is the untrained model (NTA/LNMR near chance), not resistance.
 """
 
 from __future__ import annotations
@@ -87,12 +73,9 @@ def _out(protocol: str) -> Path:
     return d
 
 
-# ---------------------------------------------------------------------------
-# load per-epoch diagnostics from training_log.jsonl across folds
-# ---------------------------------------------------------------------------
+# Load per-epoch diagnostics from training_log.jsonl across folds
 def _read_fold_log(protocol, method, tau, fold):
-    """Return list of (epoch, nta, lnmr) for the checkpoint epochs that carry
-    train_diagnostics in this fold's log, or [] if the file is missing."""
+    """Return [(epoch, nta, lnmr)] for checkpoint epochs in this fold's log, or []."""
     _, _, folder = CFG.PROTOCOLS[protocol]
     tt = int(round(tau * 100))
     fp = (CFG.EXPERIMENT_ROOT / folder / CFG.TRAINING_SUBDIR / method
@@ -157,9 +140,7 @@ def summarise(df):
     return pd.DataFrame(recs).sort_values(["method", "tau", "epoch"])
 
 
-# ---------------------------------------------------------------------------
-# styling / saving
-# ---------------------------------------------------------------------------
+# Styling / saving
 def _style():
     plt.rcParams.update({
         "font.family":        "serif",
@@ -206,9 +187,7 @@ def _plot_one(ax, summ, tau, metric, lo_key, hi_key, ylabel):
     ax.set_ylim(bottom=0)
 
 
-# ---------------------------------------------------------------------------
-# 1. single-tau two-panel trajectory (with CI bands)
-# ---------------------------------------------------------------------------
+# 1. Single-tau two-panel trajectory (with CI bands)
 def fig_focus(summ, protocol):
     _style()
     fig, axes = plt.subplots(1, 2, figsize=(12.5, 4.8))
@@ -227,9 +206,7 @@ def fig_focus(summ, protocol):
     _save(fig, _out(protocol), f"nta_lnmr_epochs_{protocol}_tau{int(round(CFG.FOCUS_TAU*100)):02d}")
 
 
-# ---------------------------------------------------------------------------
-# 2. small-multiples grid: panels = tau, lines = method
-# ---------------------------------------------------------------------------
+# 2. Small-multiples grid: panels = tau, lines = method
 def fig_grid(summ, protocol, metric, lo_key, hi_key, label):
     _style()
     taus = list(CFG.TAUS)
@@ -237,9 +214,7 @@ def fig_grid(summ, protocol, metric, lo_key, hi_key, label):
     nrow = int(np.ceil(len(taus) / ncol))
     n_last = len(taus) - ncol * (nrow - 1)   # panels in the final row
 
-    # Use a 2x-fine column grid so a partially-filled last row can be centered:
-    # each panel spans 2 sub-columns; a full row starts at sub-col 0, 2, 4, ...
-    # and an under-filled last row is shifted right by (ncol - n_last) sub-cols.
+    # 2x-fine column grid so a partially-filled last row can be centered
     fig = plt.figure(figsize=(5.0 * ncol, 3.6 * nrow))
     gs = fig.add_gridspec(nrow, 2 * ncol)
     axes = []

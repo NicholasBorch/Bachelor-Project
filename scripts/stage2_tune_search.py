@@ -1,27 +1,10 @@
-"""FINAL Optuna search runner — for the locked-in tuning experiment.
+"""
+Final Optuna hyperparameter search for the noisy-label methods (ELR, SCE, AsyCo+DivMix).
 
-Distinguished from scripts/optuna_search.py by:
-  - Three methods supported (elr, sce, asyco_divmix)
-  - Validation labels are CLEAN (loaded from tau=0 fold by image_id matching)
-  - Output tree: results/optuna_final/{method}/...
-  - Study names suffixed _FINAL
-  - Loads search spaces from configs/optuna_search_spaces_final.py
-
-Split protocol:
-  1. Load tau=0.0 train CSV (clean labels for stratification + val).
-  2. Load tau=0.2 train CSV (noisy labels for training).
-  3. Carve a 15% stratified slice by image_id, stratifying on clean labels.
-  4. The 85% train portion uses NOISY labels from tau=0.2.
-  5. The 15% val portion uses CLEAN labels from tau=0.0.
-
-This matches the experimental protocol where the model trains on noisy data
-but is validated on clean ground-truth labels.
-
-Usage:
-  python -m scripts.optuna_search_final --method elr --fold 9 --n-trials 50
-
-  # Resume an existing study (chunk 2+):
-  python -m scripts.optuna_search_final --method elr --fold 9 --n-trials 50 --resume
+The model trains on noisy labels (tau=0.2) and is validated on a stratified
+15% slice carved with CLEAN labels (loaded from the tau=0.0 fold by image_id),
+so the objective is peak smoothed validation balanced accuracy against clean
+ground truth. Search spaces come from configs/optuna_search_spaces_final.py.
 """
 from __future__ import annotations
 
@@ -111,9 +94,9 @@ def _carve_train_val_with_clean_val(
         splitter.split(clean_aligned["image_id"], clean_aligned["dx"])
     )
 
-    # Train: noisy labels from tau=0.2
+    # Train: noisy labels from tau = 0.2
     train_part = train_noisy_df.iloc[train_idx].reset_index(drop=True)
-    # Val: clean labels from tau=0.0
+    # Val: clean labels from tau = 0.0
     val_part = clean_aligned.iloc[val_idx].reset_index(drop=True)
     return train_part, val_part
 
@@ -367,7 +350,7 @@ if __name__ == "__main__":
     p.add_argument("--method", required=True,
                    choices=["elr", "sce", "asyco_divmix"])
     p.add_argument("--dataset", default="imbalanced",
-                   choices=["balanced", "imbalanced"])
+                   choices=["imbalanced"])
     p.add_argument("--optim", default="adam", choices=["sgd", "adam"])
     p.add_argument("--model", default="resnet34_pretrained",
                    choices=["resnet34_pretrained", "resnet34_scratch"])

@@ -1,97 +1,16 @@
 """
-Results Part 4 - Protocol sensitivity analysis (RQ3)
-===================================================
+Results Part 4 - protocol sensitivity analysis (RQ3).
 
-Standalone, fold-level analysis of whether the conclusions about noise-robust
-methods depend on the training protocol. This replaces the previous Part 4
-script, which depended on fold-averaged CSVs written by a separate Part 3 run
-and therefore could not perform valid cross-protocol tests.
-
-The script reads the raw per-fold test_metrics.json files directly:
-
-    results/main_experiment/{protocol_dir}/training/{method_dir}/
-        tau_{NN}/fold_{NN}/test_metrics.json
-
-It optionally reads the final-epoch mechanism diagnostics used by Part 5:
-
-    results/main_experiment/{protocol_dir}/
-        figures_and_tables/raw_fold_results.csv
-
-and, when present, the per-epoch training diagnostics:
-
-    results/main_experiment/{protocol_dir}/training/{method_dir}/
-        tau_{NN}/fold_{NN}/training_log.jsonl
-
-The output is a self-contained analysis package:
-
-    results/protocol_sensitivity/
-        figures/    publication-ready PNG plots only
-        tables/     LaTeX tables
-        data/       tidy CSV files behind every result
-        manifest.json
-
-Core outputs
-------------
-Aggregate performance:
-  * fig_protocol_<metric>.png
-      Grouped bars matching the Part 3 style exactly: panels are protocols,
-      bars are methods, x-axis is tau, and + / - stars show the direction of
-      the Holm-corrected method-vs-own-baseline result within each protocol.
-  * fig_protocol_lines_<metric>.png
-      Alternative line view: panels are methods and lines are protocols.
-  * tab_protocol_body_<metric>.tex and tab_app_protocol_full_<metric>.tex
-      Compact focus-rate body table plus complete appendix grid: mean with 95%
-      bootstrap CI and within-protocol method-vs-baseline stars.
-  * tab_delta_focus_tauNN.tex, tab_delta_avg.tex, tab_app_delta_full.tex
-      Descriptive own-baseline advantages.
-
-Ranking stability:
-  * ranking_stability.csv and tab_ranking_focus_tauNN.tex
-      Winner and next-best method under every protocol and metric.
-  * best_vs_next.csv, tab_best_vs_next_focus_tauNN.tex and
-      tab_app_best_vs_next_full.tex
-      Exploratory paired winner-vs-runner-up comparisons. The pair is selected
-      from the observed fold means, so these are explicitly labelled
-      exploratory rather than confirmatory.
-
-Cross-protocol interactions:
-  * interaction_tests.csv, tab_interaction_focus_tauNN.tex and
-      tab_app_interaction_full.tex
-      Difference-of-differences tests. For method M and protocols P1/P2:
-
-          c_k = [(M - baseline) on P1, fold k]
-                - [(M - baseline) on P2, fold k]
-
-      c is tested with the same shared exact paired Wilcoxon, exact sign-flip
-      permutation, bootstrap-difference CI and rank-biserial machinery used by
-      the rest of the thesis. Holm correction is across tau within each
-      protocol-pair x method x metric family, matching the thesis convention.
-
-Mechanism sensitivity (optional but recommended):
-  * fig_mechanism_protocol_NTA.png
-  * fig_mechanism_protocol_LNMR.png
-  * fig_mechanism_focus_tauNN.png
-  * tab_mechanism_focus_tauNN.tex and tab_app_mechanism_full.tex
-      Final-epoch memorization diagnostics by protocol.
-  * fig_epoch_protocol_NTA_tauNN.png
-  * fig_epoch_protocol_LNMR_tauNN.png
-      Protocol-resolved epoch trajectories when training_log.jsonl exists.
-
-Edit the CONFIG block only. Optional command-line overrides are also available:
-
-    python -m scripts.results_part4_protocol_sensitivity
-    python -m scripts.results_part4_protocol_sensitivity --protocols S,SP,A,AP
-    python -m scripts.results_part4_protocol_sensitivity --methods baseline,SCE,ELR,AsyCo
-    python -m scripts.results_part4_protocol_sensitivity --skip-epoch
-
-Statistical note
-----------------
-Fold indices are required to be present in both protocols before an interaction
-test is run. A paired difference-of-differences additionally assumes that fold k
-represents the same held-out split in every protocol. This is the intended
-cross-validation design. The script reports the fold-ID alignment explicitly;
-set ASSUME_IDENTICAL_FOLD_SPLITS=False to disable all paired cross-protocol tests
-if this design assumption is not satisfied.
+Standalone fold-level analysis of whether the noise-robust-method conclusions
+depend on the training protocol. Reads the raw per-fold test_metrics.json
+directly (and, when present, raw_fold_results.csv and per-epoch
+training_log.jsonl), and writes a self-contained package into
+results/protocol_sensitivity/ (figures/, tables/, data/, manifest.json):
+aggregate performance figures and tables, ranking stability, exploratory
+best-vs-next comparisons, cross-protocol difference-of-differences
+interactions, and optional mechanism / epoch-trajectory / matrix diagnostics.
+Edit the CONFIG block only; optional CLI overrides are available
+(--protocols, --methods, --focus-tau, --skip-mechanism/-epoch/-matrices).
 """
 
 from __future__ import annotations
@@ -115,16 +34,14 @@ import pandas as pd
 
 try:
     import scripts.thesis_paired_stats as TPS
-except ModuleNotFoundError:  # useful when run directly from the scripts folder
+except ModuleNotFoundError:  
     import thesis_paired_stats as TPS
 
 
-# =============================================================================
 # CONFIG - edit only this block
-# =============================================================================
 @dataclass
 class Config:
-    # --- raw experiment tree -------------------------------------------------
+    # raw experiment tree
     EXPERIMENT_ROOT: Path = Path("./results/main_experiment")
     TRAINING_SUBDIR: str = "training"
     METRICS_FILENAME: str = "test_metrics.json"
@@ -167,8 +84,7 @@ class Config:
         "ELR":      "ELR",
         "AsyCo":    "AsyCo",
     })
-    # Toggle methods here. Baseline is automatically re-added if omitted,
-    # because all protocol-sensitivity deltas require an own-protocol baseline.
+    # Toggle methods here; baseline is auto re-added if omitted
     METHODS_TO_RUN: tuple = ("baseline", "SCE", "ELR", "AsyCo")
     BASELINE: str = "baseline"
 
@@ -192,7 +108,7 @@ class Config:
     FIG_METRICS: tuple = ("BA", "MacroF1", "MacroAUC")
     TABLE_METRICS: tuple = ("BA", "MacroF1", "MacroAUC")
 
-    # --- statistical settings -----------------------------------------------
+    # statistical settings
     N_BOOT: int = 10_000
     CI: float = 0.95
     SEED: int = 10
@@ -201,52 +117,45 @@ class Config:
     SHOW_NS_IN_FIG: bool = False
     NS_SYMBOL: str = "n.s."
 
-    # Interaction tests compare each listed pair. Default: each alternative
-    # protocol against AP. Direction is P1 - P2.
+    # interaction pairs (direction P1 - P2)
     INTERACTION_CONTRASTS: tuple = (("S", "AP"), ("SP", "AP"), ("A", "AP"))
     ASSUME_IDENTICAL_FOLD_SPLITS: bool = True
     MIN_PAIRED_FOLDS_FOR_TEST: int = 2
 
-    # Ranking: include baseline so the table can reveal when no robust method
-    # actually wins. best-vs-next tests are exploratory because the pair is
-    # selected from the observed means.
+    # include baseline in ranking; best-vs-next is exploratory
     RANKING_INCLUDE_BASELINE: bool = True
 
-    # --- optional mechanism analysis ----------------------------------------
+    # optional mechanism analysis
     RUN_FINAL_EPOCH_MECHANISM: bool = True
     RUN_EPOCH_TRAJECTORIES: bool = True
-    # Read every non-zero tau so the AP-style all-tau epoch grids can be
-    # reproduced for every selected protocol. Cross-protocol epoch figures are
-    # intentionally limited to the declared comparison tau(s) below.
+    # taus read for the epoch grids (cross-protocol limited to those below)
     EPOCH_TAUS: tuple = (0.10, 0.20, 0.30, 0.40, 0.50)
     EPOCH_PROTOCOL_COMPARISON_TAUS: tuple = (0.20,)
 
-    # --- protocol-resolved matrices / per-class diagnostics -----------------
+    # protocol-resolved matrices / per-class diagnostics
     RUN_MATRIX_DIAGNOSTICS: bool = True
     CLASS_ORDER_MODE: str = "freq"  # "freq", "alpha", or an explicit tuple/list
     CLASSES_ALPHA: tuple = ("akiec", "bcc", "bkl", "df", "mel", "nv", "vasc")
     CLASSES_FREQ: tuple = ("nv", "bkl", "mel", "bcc", "akiec", "vasc", "df")
 
-    # Remove only the old direct files in figures/, tables/, and data/ when the
-    # new nested layout is used. Existing nested folders are preserved.
+    # remove only old flat files in figures/tables/data; nested folders kept
     CLEAN_LEGACY_FLAT_OUTPUTS: bool = True
-    # Earlier versions emitted both PDF and PNG. PDFs are redundant for the
-    # thesis workflow, so every run removes stale PDFs under OUT_ROOT.
+    # remove stale PDFs under OUT_ROOT (figures are PNG-only)
     CLEAN_REDUNDANT_PDFS: bool = True
 
-    # --- outputs -------------------------------------------------------------
+    # outputs
     OUT_ROOT: Path = Path("./results/protocol_sensitivity")
     SAVE_PNG: bool = True
     FIG_DPI: int = 300
 
-    # Match the Part 3 method palette exactly.
+    # Part 3 method palette
     PALETTE: dict = field(default_factory=lambda: {
         "baseline": "#9ec9e2",
         "SCE":      "#2a9d8f",
         "ELR":      "#e07a3f",
         "AsyCo":    "#7b5cb8",
     })
-    # Separate protocol encoding for plots whose lines represent protocols.
+    # protocol encoding for plots whose lines are protocols
     PROTOCOL_PALETTE: dict = field(default_factory=lambda: {
         "S":  "#4c78a8",
         "SP": "#72b7b2",
@@ -261,9 +170,7 @@ class Config:
 CFG = Config()
 
 
-# =============================================================================
 # paths, formatting, small helpers
-# =============================================================================
 LATEX_PREAMBLE = r"""% Preamble: \usepackage{booktabs,makecell,multirow,graphicx,longtable,amsmath,pdflscape}
 """
 
@@ -318,7 +225,7 @@ def _ensure_out_tree() -> None:
     CFG.OUT_ROOT.mkdir(parents=True, exist_ok=True)
     _fig_dir(); _table_dir(); _data_dir()
     _cleanup_legacy_flat_outputs()
-    # Create the stable navigation tree up front, even when optional inputs are absent.
+    # create the output folder tree up front
     for parts in (
         ("performance", "grouped_bars"),
         ("performance", "protocol_lines"),
@@ -435,8 +342,7 @@ def _active_methods() -> list[str]:
     if CFG.BASELINE not in methods:
         print(f"[config] '{CFG.BASELINE}' was omitted from METHODS_TO_RUN; re-adding it as the reference.")
         methods.insert(0, CFG.BASELINE)
-        # Persist the normalized selection so the notice is printed once and
-        # every downstream function sees the same stable method order.
+        # persist the normalized selection (printed once)
         CFG.METHODS_TO_RUN = tuple(methods)
     return methods
 
@@ -670,9 +576,7 @@ def _validate_config() -> None:
         raise ValueError(f"ANCHOR_PROTOCOL='{CFG.ANCHOR_PROTOCOL}' is not in PROTOCOL_DIRS")
 
 
-# =============================================================================
 # aggregate metric loading and summaries
-# =============================================================================
 def load_metric_long() -> pd.DataFrame:
     rows: list[dict] = []
     first_payload: Optional[dict] = None
@@ -827,10 +731,7 @@ def method_vs_baseline(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def method_vs_clean(df: pd.DataFrame) -> pd.DataFrame:
-    """Noise sensitivity per cell: each (protocol, method) at tau > 0 vs the SAME
-    (protocol, method) at tau = 0, paired by fold. delta = mean(noisy - clean), so
-    direction < 0 is degradation. Holm-corrected across the five noisy tau within
-    each (protocol, method, metric). Same paired test and columns as method_vs_baseline."""
+    """Noise sensitivity: each (protocol, method) at tau>0 vs the same at tau=0, paired by fold."""
     rows = []
     for protocol in available_protocols(df):
         for metric in CFG.TABLE_METRICS:
@@ -867,9 +768,7 @@ def method_vs_clean(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-# =============================================================================
 # ranking stability and exploratory best-vs-next-best
-# =============================================================================
 def build_ranking_stability(summary: pd.DataFrame) -> pd.DataFrame:
     methods = _active_methods() if CFG.RANKING_INCLUDE_BASELINE else _robust_methods()
     rows = []
@@ -929,9 +828,7 @@ def best_vs_next(df: pd.DataFrame, ranking: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-# =============================================================================
 # cross-protocol difference-of-differences interactions
-# =============================================================================
 def _aligned_advantages(df: pd.DataFrame, p1: str, p2: str, metric: str,
                         method: str, tau: float) -> tuple[pd.DataFrame, dict]:
     """Fold-aligned own-baseline advantages in two protocols."""
@@ -1001,19 +898,9 @@ def interaction_tests(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     return pd.DataFrame(result_rows), pd.DataFrame(alignment_rows)
 
 
-# =============================================================================
 # cross-protocol comparison: which protocol is best for a fixed method
-# =============================================================================
 def protocol_comparison(df: pd.DataFrame) -> pd.DataFrame:
-    """For each method, metric and tau, compare the method's per-fold scores
-    between every pair of protocols (paired by fold, since folds are identical
-    across protocols). Holm correction is applied across the protocol-pairs
-    within each (method, metric, tau) family.
-
-    Unlike best_vs_next, the method is fixed and pre-specified, so this family
-    is CONFIRMATORY rather than exploratory. delta = score(P1) - score(P2), so
-    delta>0 means protocol P1 scores higher for that method.
-    """
+    """Compare each method's per-fold scores between every protocol pair (paired by fold)."""
     import itertools
     protocols = available_protocols(df)
     if len(protocols) < 2:
@@ -1057,9 +944,7 @@ def protocol_comparison(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-# =============================================================================
 # own-baseline delta data
-# =============================================================================
 def delta_long(summary: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     full_rows = []
     for protocol in summary.protocol.unique():
@@ -1085,9 +970,7 @@ def delta_long(summary: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.Da
     return full, focus, avg
 
 
-# =============================================================================
 # aggregate performance figures
-# =============================================================================
 def _yerr(rows: pd.DataFrame) -> np.ndarray:
     means = rows["mean"].to_numpy(dtype=float)
     lo = rows["lo"].to_numpy(dtype=float)
@@ -1159,11 +1042,7 @@ def _grouped_bar_panel(ax, summary: pd.DataFrame, mvb: pd.DataFrame,
 def _fig_combined_metrics_by_protocol(summary: pd.DataFrame, mvb: pd.DataFrame,
                                       protocol: str, metrics: list[str], stem: str,
                                       title_suffix: str) -> None:
-    """Part-3-style side-by-side grouped bars for one protocol.
-
-    This mirrors the main-protocol method-comparison figure while preserving
-    the same method colours, significance symbols, and honest shared 0..1 axis.
-    """
+    """Part-3-style side-by-side grouped bars for one protocol."""
     metrics = [m for m in metrics if m in set(summary.metric.unique())]
     if not metrics:
         return
@@ -1385,9 +1264,7 @@ def fig_advantage_focus(mvb: pd.DataFrame) -> None:
     fig.tight_layout(rect=[0, 0.08, 1, 0.955])
     _savefig(fig, f"fig_advantage_focus_tau{int(round(CFG.FOCUS_TAU * 100)):02d}")
 
-# =============================================================================
 # LaTeX tables: aggregate, delta, ranking, best-next, interaction
-# =============================================================================
 def _summary_cell(summary: pd.DataFrame, mvb: pd.DataFrame, protocol: str,
                   metric: str, method: str, tau: float, best_method: str) -> str:
     row = summary[(summary.protocol == protocol) & (summary.metric == metric)
@@ -1410,12 +1287,7 @@ def _summary_cell(summary: pd.DataFrame, mvb: pd.DataFrame, protocol: str,
 
 
 def emit_protocol_body_table(summary: pd.DataFrame, mvb: pd.DataFrame, metric: str) -> None:
-    """Emit a compact focus-rate body table and a complete appendix table.
-
-    The compact body artifact is intentionally limited to FOCUS_TAU so it fits
-    cleanly as a normal float. The appendix artifact retains every tau and uses
-    longtable so it can break over pages rather than being shrunk excessively.
-    """
+    """Emit a compact focus-rate body table and a complete appendix table."""
     protocols = [p for p in _active_protocols() if p in set(summary.protocol.unique())]
     methods = _active_methods()
 
@@ -1695,8 +1567,7 @@ def emit_interaction_full(interactions: pd.DataFrame) -> None:
 
 
 def emit_protocol_comparison_full(pc: pd.DataFrame) -> None:
-    """Full cross-protocol comparison table: every method, metric, tau and
-    protocol-pair. Wide, so landscape longtable, matching the interaction table."""
+    """Full cross-protocol comparison table (landscape longtable)."""
     if pc.empty:
         return
     rows = []
@@ -1739,8 +1610,7 @@ def emit_protocol_comparison_full(pc: pd.DataFrame) -> None:
 
 
 def emit_protocol_comparison_focus(pc: pd.DataFrame) -> None:
-    """Focus table at FOCUS_TAU: all methods, all protocol-pairs, one metric block
-    each. A standard (non-landscape) table since it is one tau only."""
+    """Focus table at FOCUS_TAU: all methods and protocol-pairs (one tau)."""
     if pc.empty:
         return
     sub_tau = pc[np.isclose(pc.tau, CFG.FOCUS_TAU)]
@@ -1782,9 +1652,7 @@ def emit_protocol_comparison_focus(pc: pd.DataFrame) -> None:
     _write_tex("tab_protocol_comparison_focus", "\n".join(tex))
 
 
-# =============================================================================
 # mechanism sensitivity: final-epoch NTA / LNMR from raw_fold_results.csv
-# =============================================================================
 def _raw_method_to_logical(value: str) -> str:
     value = str(value)
     inverse = {folder: logical for logical, folder in CFG.METHOD_DIRS.items()}
@@ -1818,8 +1686,7 @@ def load_mechanism_raw(metric_df: pd.DataFrame) -> pd.DataFrame:
         raw = raw[raw.method.isin(_active_methods())]
         raw["protocol"] = protocol
         if "fold" not in raw.columns:
-            # No inferential mechanism tests are performed; synthetic row IDs
-            # preserve a useful count when fold was not written explicitly.
+            # synthetic row IDs when fold is absent
             raw["fold"] = raw.groupby(["method", "tau"]).cumcount()
         keep = ["protocol", "method", "tau", "fold", "nta", "lnmr"]
         rows.extend(raw[keep].to_dict("records"))
@@ -2016,9 +1883,7 @@ def emit_mechanism_full(mech: pd.DataFrame) -> None:
     _write_tex("tab_app_mechanism_full", "\n".join(tex))
 
 
-# =============================================================================
 # optional epoch-trajectory analysis
-# =============================================================================
 def _read_epoch_log(protocol: str, method: str, tau: float, fold: int) -> list[dict]:
     fp = _log_path(protocol, method, tau, fold)
     if not fp.exists():
@@ -2201,9 +2066,7 @@ def epoch_features(epoch: pd.DataFrame) -> pd.DataFrame:
 
 
 
-# =============================================================================
 # protocol-resolved matrix and per-class diagnostics
-# =============================================================================
 def _read_metrics_payload(protocol: str, method: str, tau: float, fold: int) -> Optional[dict]:
     fp = _metrics_path(protocol, method, tau, fold)
     if not fp.exists():
@@ -2294,8 +2157,7 @@ def _grid_dims(n_panels, ncols):
 
 
 def _collect_perclass_matrix(protocol, tau, kind):
-    """(methods x classes) fold-mean matrix for one tau. kind in {'f1','lnmr','nta'}.
-    Part 4 reads all three from the per-fold JSON via _mean_class_vector."""
+    """(methods x classes) fold-mean matrix for one tau."""
     classes = _classes()
     alpha = list(CFG.CLASSES_ALPHA)
     order_idx = [alpha.index(c) for c in classes]
@@ -2312,11 +2174,7 @@ def _collect_perclass_matrix(protocol, tau, kind):
 
 
 def fig_perclass_grid(protocol, kind, low_is_good, label, include_clean):
-    """One tall figure: rows = tau, each panel a (methods x classes) heatmap.
-    kind in {'f1','lnmr','nta'}. F1 can include tau=0; LNMR/NTA cannot.
-    Layout copied from the Part-5 fig_perclass_grid; only the loader
-    (_collect_perclass_matrix), the saver (_savefig), and good_cmap -> _good_cmap
-    are the Part-4 equivalents."""
+    """One tall figure: rows = tau, each panel a (methods x classes) heatmap."""
     classes = _classes()
     methods = _active_methods()
     mlabels = [CFG.METHOD_LABELS.get(m, m) for m in methods]
@@ -2488,10 +2346,7 @@ def emit_confusion_focus_extras(protocol: str, methods: list[str], classes: list
 
 
 def fig_confusion_grid_all(protocol, include_clean=False):
-    """One master figure: rows = tau, cols = method, each panel a row-normalized
-    7x7 confusion matrix. Ported from the Part-5 fig_confusion_grid_all; only the
-    method list (_active_methods), the saver (_savefig), and dropping the SAVE_PDF
-    branch differ from Part 5."""
+    """One master figure: rows = tau, cols = method, each a row-normalized 7x7 confusion matrix."""
     classes = _classes()
     alpha = list(CFG.CLASSES_ALPHA)
     order_idx = [alpha.index(c) for c in classes]
@@ -2575,8 +2430,7 @@ def _emit_perclass_focus_table(perclass: pd.DataFrame, protocol: str, diagnostic
 
 
 def _focus_protocol_grid(protocols, diagnostic, key, low_is_good, tau=None):
-    """2x2 per-class grid at one tau: panels are protocols, columns left=pretrained
-    / right=scratch, rows SGD (top) / Adam (bottom). Each panel methods x classes."""
+    """2x2 per-class grid at one tau (panels are protocols)."""
     if tau is None:
         tau = CFG.FOCUS_TAU
     label = {"perclass_f1": "Per-class F1",
@@ -2753,9 +2607,7 @@ def write_output_readme() -> None:
     print(f"[output] wrote {fp}")
 
 
-# =============================================================================
 # prose helper and manifest
-# =============================================================================
 def print_prose_helper(summary: pd.DataFrame, ranking: pd.DataFrame,
                        best_next_df: pd.DataFrame, interactions: pd.DataFrame,
                        mechanism: pd.DataFrame, comp: pd.DataFrame) -> None:
@@ -2834,9 +2686,7 @@ def write_manifest() -> None:
     print(f"[manifest] wrote {fp}")
 
 
-# =============================================================================
 # CLI and main
-# =============================================================================
 def _split_csv(value: str) -> tuple[str, ...]:
     return tuple(x.strip() for x in value.split(",") if x.strip())
 
@@ -2873,20 +2723,6 @@ def apply_args(args) -> None:
         CFG.RUN_MATRIX_DIAGNOSTICS = False
 
 
-# =============================================================================
-# THESIS CURATION  ---  PASTE THIS BLOCK INTO results_part4_protocol_sensitivity.py
-# immediately BEFORE the final `def main(...)` (it uses CFG and the helpers
-# already defined above). Then add the two hooks described at the bottom.
-#
-# What it does, after Part 4 has generated everything into OUT_ROOT/{figures,
-# tables,data}:
-#   * copies the curated set into OUT_ROOT/THESIS/{body,appendix}/{figures,tables}
-#   * stitches the per-tau heatmaps Part 4 already wrote into across-tau GRID
-#     PNGs (per protocol), so LaTeX never has to assemble subfigures
-#   * writes OUT_ROOT/THESIS/THESIS_MAP.md  (file -> where -> \label -> caption)
-#
-# It recomputes nothing and tolerates missing inputs (partial runs are fine).
-# =============================================================================
 import shutil as _shutil
 
 try:
@@ -3005,7 +2841,7 @@ def curate_thesis_split(metric_df) -> None:
     taus_all = list(CFG.TAUS)
     rows: list = []
 
-    # ---------------------------------------------------------------- BODY
+    # BODY
     # RQ3 headline: grouped bars (BA, F1) + interaction + ranking + body scores.
     for metric, lab in (("BA", "balanced accuracy"), ("MacroF1", "Macro F1")):
         _thesis_copy(_fig_src("performance", "grouped_bars", f"fig_protocol_{metric}.png"),
@@ -3029,7 +2865,7 @@ def curate_thesis_split(metric_df) -> None:
                      f"Per-protocol {metric} scores (mean, 95\\% CI) at the focus rate with "
                      f"method-vs-baseline significance.")
 
-    # ------------------------------------------------------------ APPENDIX
+    # APPENDIX
     # Aggregate: AUC bars, line views, full grids, deltas, exploratory best-next.
     _thesis_copy(_fig_src("performance", "grouped_bars", "fig_protocol_MacroAUC.png"),
                  "appendix", "figure", "app_p4_protocol_bars_MacroAUC.png", rows,
@@ -3089,7 +2925,7 @@ def curate_thesis_split(metric_df) -> None:
             _thesis_copy(_fig_src("matrices", diag, proto, f"grid_perclass_{kind}_{proto}.png"),
                          "appendix", "figure", f"app_p4_{diag}_grid_{proto}.png", rows,
                          f"fig:app-{diag}-{proto}", f"Per-class {lab} at every $\\tau>0$, Protocol {proto}.")
-        # confusion: now a real matplotlib figure (fig_confusion_grid_all) -- just copy it.
+        # confusion grid figure, just copy it
         _thesis_copy(_fig_src("matrices", "confusion", proto,
                               f"confusion_norm_grid_ALL_{proto}_noisy.png"),
                      "appendix", "figure", f"app_p4_confusion_grid_{proto}.png", rows,

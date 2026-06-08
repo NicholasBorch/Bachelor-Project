@@ -1,28 +1,9 @@
-"""Main Experiment analysis entry point.
+"""
+Main-experiment aggregation: figures, tables, and statistical tests.
 
-Walks results/main_experiment/training/, aggregates results across folds,
-produces figures and statistical tests, writes everything under
-results/main_experiment/figures_and_tables/.
-
-Outputs:
-
-  aggregated_results.csv         — mean ± std per (method, dataset, init, optim, tau)
-  raw_fold_results.csv           — every fold's results (one row per job)
-  statistical_tests_vs_baseline.csv
-                                 — Wilcoxon: each method vs baseline, per condition
-  statistical_tests_noise_sensitivity.csv
-                                 — Wilcoxon: each method-at-tau vs same-method-at-tau=0
-  per_condition/*.png            — figures per (dataset, init, optim)
-  cross_condition/*.png          — overview figures spanning conditions
-
-This script mirrors scripts/stage4_analyze.py but is targeted at the
-main_experiment results tree and does NOT load Stage 2 epoch budgets (since
-the main experiment uses a fixed 150-epoch budget).
-
-Usage:
-    python -m scripts.final_experiment_analyze
-    python -m scripts.final_experiment_analyze --force
-    python -m scripts.final_experiment_analyze -v   # debug logging
+Walks results/main_experiment/training/, aggregates across folds, and writes
+aggregated/raw CSVs, Wilcoxon tables (vs baseline and vs clean), and per- and
+cross-condition figures under results/main_experiment/figures_and_tables/.
 """
 from __future__ import annotations
 
@@ -58,13 +39,11 @@ INITS: tuple[str, ...] = ("pretrained",)      # toggle if you run scratch later
 OPTIMS: tuple[str, ...] = ("adam",)            # toggle if you run sgd later
 TAUS: tuple[float, ...] = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5)
 
-# Statistical tests are run on these metrics; multiple-testing corrections
-# are applied WITHIN each metric (so the two are independent families).
+# Stats are run per metric; corrections applied within each metric.
 STATS_METRICS: tuple[str, ...] = ("balanced_accuracy", "macro_f1")
 
 
 def _tau_tag(tau: float) -> str:
-    """tau=0.1 -> 'tau10'."""
     return f"tau{int(round(tau * 100)):02d}"
 
 
@@ -142,9 +121,6 @@ def _make_cross_condition_plots(
     df: pd.DataFrame, output_dir: Path,
     datasets, inits, optims,
 ) -> None:
-    # These overview plots are only meaningful when multiple values of an
-    # axis are present. If you only ran a single (init, optim) condition,
-    # the cross-condition plots will be near-trivial but still saved.
     cross_dir = output_dir / "cross_condition"
     ensure_dir(cross_dir)
     if len(inits) >= 2 or len(optims) >= 2:
@@ -230,11 +206,7 @@ def main() -> int:
         datasets, inits, optims,
     )
 
-    # --- 1. Load all results -----------------------------------------------
-    # NOTE: load_all_results expects the standard results/{training,...}
-    # structure. Since our main_experiment puts the per-job dirs under
-    # main_experiment/training/{method}/..., we pass main_experiment as
-    # the results root.
+    # Load all results
     logger.info("Loading results from %s ...", results_dir / "training")
     df = load_all_results(results_dir)
     logger.info("Loaded %d fold-level rows.", len(df))
@@ -242,7 +214,7 @@ def main() -> int:
     if df.empty:
         logger.warning("No results found. Writing empty tables and exiting.")
 
-    # --- 2. Tables ----------------------------------------------------------
+    # Tables
     aggregated = aggregate_mean_std(df)
     aggregated_path = output_dir / "aggregated_results.csv"
     aggregated.to_csv(aggregated_path, index=False)
@@ -254,7 +226,7 @@ def main() -> int:
     )
     logger.info("Wrote %s (%d rows).", raw_path, len(df))
 
-    # --- 3. Statistical tests ----------------------------------------------
+    # Statistical tests
     stats_vs_baseline, stats_vs_clean = _build_statistical_tables(df)
     sb_path = output_dir / "statistical_tests_vs_baseline.csv"
     sb_path.write_bytes(
@@ -268,14 +240,14 @@ def main() -> int:
     )
     logger.info("Wrote %s (%d rows).", sc_path, len(stats_vs_clean))
 
-    # --- 4. Figures --------------------------------------------------------
+    # Figures
     if not df.empty:
         _make_per_condition_plots(df, output_dir, datasets, inits, optims)
         _make_cross_condition_plots(df, output_dir, datasets, inits, optims)
     plots_written = len(list(output_dir.rglob("*.png")))
     logger.info("Wrote %d figure files.", plots_written)
 
-    # --- 5. Manifest -------------------------------------------------------
+    # Manifest
     manifests_dir = root / "results" / "manifests"
     ensure_dir(manifests_dir)
     manifest_path = manifests_dir / "final_experiment_analyze.json"

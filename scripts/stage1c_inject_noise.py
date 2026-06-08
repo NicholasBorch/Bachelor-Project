@@ -1,4 +1,5 @@
-"""Stage 1c: inject instance-dependent label noise into train folds.
+"""
+Stage 1c: inject instance-dependent label noise into train folds.
 
 For each tau in {0.0, 0.1, 0.2, 0.3, 0.4, 0.5} and each fold:
     - compute train set (folds != test_fold) and test set (fold == test_fold)
@@ -6,7 +7,7 @@ For each tau in {0.0, 0.1, 0.2, 0.3, 0.4, 0.5} and each fold:
     - at tau = 0, pass train labels through unchanged (short-circuit)
     - test labels are NEVER altered (clean test set always)
 
-Per-fold seed: global_seed * 10_000 + fold_id, as per PROJECT_DOCUMENTATION §4.6.
+Per-fold seed: global_seed * 10_000 + fold_id.
 
 Run:
     python -m scripts.stage1c_inject_noise \\
@@ -41,7 +42,6 @@ from src.utils.seed import fold_seed
 
 
 def _tau_dirname(tau: float) -> str:
-    """tau=0.0 -> 'tau_00', tau=0.1 -> 'tau_10', tau=0.5 -> 'tau_50'."""
     return f"tau_{int(round(tau * 100)):02d}"
 
 

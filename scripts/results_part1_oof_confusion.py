@@ -1,62 +1,11 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-analyze_oof_confusion.py
-========================
-Class-level confusability evidence for the Feature-Driven IDN noise model,
-computed DIRECTLY from the out-of-fold (OOF) softmax probabilities that the
-noise construction is built on.
+Class-level confusability evidence for Feature-Driven IDN, computed directly from
+the saved out-of-fold (OOF) softmax.
 
-This script does NOT retrain anything and does NOT re-inject noise. It only
-*reads* the artefact already written by Stage 1b:
-
-    data/processed/HAM10000/cv_folds/{dataset}/oof_probs/oof_probs_full.npy   (N, 7)
-
-and (if present, for a per-fold 10-fold CI matching the rest of the thesis):
-
-    data/processed/HAM10000/cv_folds/{dataset}/oof_probs/fold_{NN}.npy
-    data/processed/HAM10000/cv_folds/{dataset}/oof_probs/fold_{NN}_ids.csv
-
-Why this exists
----------------
-The aggregate flip-target distribution reported in the thesis (e.g. "nv -> mel
-carries 0.54 of the flip mass") is computed AFTER the true-class column is masked
-and the row is renormalised (idn_feature_driven.generate_feature_driven_idn,
-Eq. 2.7). Renormalisation discards the absolute confidence the OOF model placed
-on the true class, so the flip distribution alone CANNOT establish that the
-classes are genuinely visually confusable: a confidently-correct nevus
-([0.95 nv, 0.03 mel, ...]) and a genuinely-confused one ([0.45 nv, 0.45 mel, ...])
-produce the *same* masked-and-renormalised target row.
-
-The object that DOES carry that information is the raw, UN-masked OOF softmax,
-which is exactly what `oof_probs_full.npy` stores (the masking happens later, at
-injection time, not in this file). This script reports, per true class:
-
-  * mean P(true class)            -- the OOF model's confidence on that class
-  * mean P(top confusion target)  -- ABSOLUTE, un-masked  (not a renorm artefact)
-  * argmax-to-target rate          -- the OOF analogue of the ResNet-34 clean
-                                      confusion (e.g. the "23% of nv -> mel")
-  * renormalised flip mass         -- the masked-and-renormalised target
-                                      (reproduces the thesis flip distribution)
-
-The decisive comparison is "argmax / absolute" vs "renormalised": if the absolute
-quantities are already substantial, the confusability is real and the
-renormalisation is not what manufactures it.
-
-Outputs (into results/oof_confusion/{dataset}/)
-    oof_confusion_softmax_rownorm.csv   (7x7) mean un-masked softmax per true class
-    oof_confusion_argmax.csv            (7x7) hard argmax confusion per true class
-    oof_flip_target_renorm.csv          (7x7) masked+renormalised aggregate (diag=0)
-    oof_confusability_summary.csv       per-true-class headline stats (+ 10-fold CI)
-    oof_confusion_softmax_rownorm.png   heatmap of the un-masked softmax confusion
-    oof_confusion_argmax.png            heatmap of the hard argmax confusion
-    tab_oof_confusability.tex           body LaTeX table (confidence + top target)
-    manifest.json
-
-Run:
-    python -m scripts.analyze_oof_confusion
-    python -m scripts.analyze_oof_confusion --dataset imbalanced
-    python -m scripts.analyze_oof_confusion --pair nv mel   # extra spotlight pair
+Reads oof_probs_full.npy (and per-fold files when present, for a 10-fold CI) and
+reports per true class the OOF confidence, the dominant confusion target, the
+argmax-to-target rate, and the masked+renormalised flip mass, into
+results/oof_confusion/{dataset}/ (CSVs, two heatmaps, a LaTeX table, manifest).
 """
 from __future__ import annotations
 
@@ -91,16 +40,9 @@ _BOOT_SEED = 10
 _CI = 0.95
 
 
-# ===========================================================================
-# NUMERIC CORE  (pure numpy/pandas; no project imports -> unit-testable)
-# ===========================================================================
+# Numeric core
 def _mask_renorm(row: np.ndarray, true_idx: int) -> np.ndarray:
-    """Mask the true-class entry and renormalise over the remaining classes.
-
-    This reproduces idn_feature_driven.generate_feature_driven_idn's transition
-    construction (Eq. 2.7): p[y]=0 then divide by the off-diagonal sum, with the
-    same uniform fall-back when the OOF model put all mass on the true class.
-    """
+    """Mask the true-class entry and renormalise over the remaining classes."""
     p = row.astype(np.float64).copy()
     p[true_idx] = 0.0
     s = p.sum()
@@ -113,11 +55,7 @@ def _mask_renorm(row: np.ndarray, true_idx: int) -> np.ndarray:
 
 
 def softmax_confusion(probs: np.ndarray, labels: np.ndarray, n_classes: int) -> np.ndarray:
-    """(C, C) mean UN-masked OOF softmax per true class.
-
-    Row i = average softmax vector over all samples whose true class is i.
-    Diagonal i,i = mean P(true class i). Each row sums to ~1.
-    """
+    """(C, C) mean un-masked OOF softmax per true class (rows sum to ~1)."""
     M = np.full((n_classes, n_classes), np.nan)
     for i in range(n_classes):
         sel = labels == i
@@ -127,12 +65,7 @@ def softmax_confusion(probs: np.ndarray, labels: np.ndarray, n_classes: int) -> 
 
 
 def argmax_confusion(probs: np.ndarray, labels: np.ndarray, n_classes: int) -> np.ndarray:
-    """(C, C) hard argmax confusion per true class.
-
-    Row i, col j = fraction of true-class-i samples whose OOF argmax is j.
-    This is the OOF analogue of a clean-model confusion matrix; each row sums
-    to 1. The diagonal is the OOF top-1 accuracy on that class.
-    """
+    """(C, C) hard argmax confusion per true class (rows sum to 1)."""
     pred = probs.argmax(axis=1)
     M = np.full((n_classes, n_classes), np.nan)
     for i in range(n_classes):
@@ -144,12 +77,7 @@ def argmax_confusion(probs: np.ndarray, labels: np.ndarray, n_classes: int) -> n
 
 
 def flip_target_confusion(probs: np.ndarray, labels: np.ndarray, n_classes: int) -> np.ndarray:
-    """(C, C) aggregate masked+renormalised flip-target distribution per true class.
-
-    Row i = average of mask_renorm(softmax, i) over true-class-i samples. The
-    diagonal is 0. This reproduces the thesis Feature-Driven aggregate flip
-    distribution (the matrix whose nv->mel entry is ~0.54).
-    """
+    """(C, C) masked+renormalised flip-target distribution per true class (diag 0)."""
     M = np.full((n_classes, n_classes), np.nan)
     for i in range(n_classes):
         sel = labels == i
@@ -161,7 +89,7 @@ def flip_target_confusion(probs: np.ndarray, labels: np.ndarray, n_classes: int)
 
 
 def _boot_ci(values: np.ndarray) -> tuple[float, float, float]:
-    """Percentile bootstrap CI of the mean. Matches the thesis convention."""
+    """Percentile bootstrap CI of the mean; returns (mean, lo, hi)."""
     v = np.asarray(values, float)
     v = v[~np.isnan(v)]
     if v.size == 0:
@@ -181,15 +109,7 @@ def per_fold_pair_stats(
     src_idx: int,
     tgt_idx: int,
 ) -> dict:
-    """Per-fold statistics for a (true=src -> target=tgt) confusion pair, then a
-    10-fold mean with a 95% bootstrap CI (matching the rest of the thesis).
-
-    For each fold k, restricted to samples whose true class is `src`:
-        confidence_k   = mean P(src)            on those samples (diagonal)
-        abs_tgt_k      = mean P(tgt)            ABSOLUTE, un-masked
-        argmax_tgt_k   = fraction with argmax == tgt
-        renorm_tgt_k   = mean masked+renorm mass on tgt (the flip target)
-    """
+    """Per-fold stats for a (src -> tgt) confusion pair with a 10-fold bootstrap CI."""
     conf, abs_tgt, argmax_tgt, renorm_tgt = [], [], [], []
     for k in sorted(fold_to_probs):
         P, y = fold_to_probs[k], fold_to_labels[k]
@@ -237,9 +157,7 @@ def confusability_summary(
     return pd.DataFrame(rows)
 
 
-# ===========================================================================
-# heatmap (Purples, matching the confusion-matrix style used in Part 5)
-# ===========================================================================
+# heatmap (Purples, matching the Part 5 confusion-matrix style)
 def _heatmap(M: np.ndarray, classes: list[str], title: str, out_png: Path,
              diag_is_blank: bool = False) -> None:
     plt.rcParams.update(_PLT_STYLE)
@@ -303,9 +221,7 @@ def _emit_body_table(summary: pd.DataFrame, out_tex: Path) -> None:
     print(f"[tab] wrote {out_tex}")
 
 
-# ===========================================================================
-# I/O + orchestration  (project imports live here so the core stays portable)
-# ===========================================================================
+# I/O + orchestration (project imports live here so the core stays portable)
 def _load_inputs(dataset: str):
     """Return (probs_full, labels_int, class_names, per_fold or None, out_dir, root)."""
     from src.data.ham10000 import CLASS_NAMES, NUM_CLASSES, class_to_index
@@ -410,7 +326,7 @@ def main(argv=None) -> int:
              out_dir / "oof_confusion_argmax.png")
     _emit_body_table(summary, out_dir / "tab_oof_confusability.tex")
 
-    # ---- console: the decisive numbers + artefact check --------------------
+    # console summary
     print("\n" + "=" * 74)
     print("OOF CONFUSABILITY (per true class, pooled over all samples)")
     print("=" * 74)
@@ -429,12 +345,8 @@ def main(argv=None) -> int:
         show(f"ABS  P({tgt})  [un-masked]", "abs_target")
         show(f"argmax-> {tgt} rate  [hard]", "argmax_target")
         show(f"renorm flip mass -> {tgt}", "renorm_target")
-        print("\n  ARTEFACT CHECK: if 'ABS P(tgt)' and 'argmax-> tgt rate' are already")
-        print("  substantial, the confusability is genuine and the (much larger)")
-        print("  'renorm flip mass' is NOT what manufactures it -- it only rescales")
-        print("  the leftover off-diagonal mass to sum to one.")
 
-    # ---- manifest ----------------------------------------------------------
+    # manifest
     from src.utils.manifest import write_manifest
     manifest_path = root / cfg["paths"]["manifests"] / f"analyze_oof_confusion_{args.dataset}.json"
     write_manifest(

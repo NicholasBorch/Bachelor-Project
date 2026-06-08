@@ -1,35 +1,11 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-Results.5 - Mechanism analysis (NTA / LNMR / per-class F1 / confusion).
+Results.5 - mechanism analysis (NTA / LNMR / per-class F1 / confusion).
 
-DESCRIPTIVE ONLY. No statistical tests. The single concession to inference is a
-95% bootstrap CI band on the aggregate NTA/LNMR curves (for visual consistency
-with the rest of the chapter); everything else is fold-averaged texture.
-
-OUTPUTS (into results/mechanism/<protocol>/, one subfolder per artifact type)
-  nta_lnmr/        aggregate NTA & LNMR vs tau, one line per method, CI bands,
-                   tau=0 excluded (undefined).
-  perclass_f1/     per-class F1 heatmap (methods x classes), one per tau.
-  perclass_lnmr/   per-class LNMR-by-clean heatmap, one per tau (tau>0).
-  perclass_nta/    per-class NTA-by-clean heatmap, one per tau (tau>0).
-  confusion/       summed confusion matrices per (method, tau): row-normalized
-                   AND raw-count versions.
-
-COLOUR CONVENTION
-  Green = good, red = bad, always. For high-is-good metrics (NTA, F1) green is
-  the high end; for low-is-good metrics (LNMR) the colormap is reversed so green
-  is the low end. Confusion matrices use a neutral sequential map (counts/rates
-  are not "good/bad").
-
-DATA SOURCES
-  * raw_fold_results.csv (per fold: nta, lnmr, per_class_f1_<cls>) for the
-    NTA/LNMR curves and the per-class F1 heatmap.
-  * per-run test_metrics.json for the confusion matrices and the per-class
-    NTA/LNMR-by-clean arrays (summed / averaged over folds here).
-
-CONFIG: only the block below. Protocol selection is by (init, optim); extend
-PROTOCOLS as the other runs land.
+Descriptive only, no statistical tests (the one exception is a 95% bootstrap
+CI band on the aggregate NTA/LNMR curves). Reads raw_fold_results.csv and the
+per-run test_metrics.json and writes into results/mechanism/<protocol>/, one
+subfolder per artifact type: nta_lnmr, perclass_f1, perclass_lnmr, perclass_nta,
+and confusion (row-normalized and raw-count). Colour convention: green = good.
 """
 
 from __future__ import annotations
@@ -48,7 +24,7 @@ from matplotlib.colors import LinearSegmentedColormap
 
 @dataclass
 class Config:
-    # --- where the data is ---------------------------------------------------
+    # data locations
     EXPERIMENT_ROOT: Path = Path("./results/main_experiment")
     # protocol code -> (init, optim, folder under EXPERIMENT_ROOT)
     PROTOCOLS: dict = field(default_factory=lambda: {
@@ -65,7 +41,7 @@ class Config:
     FOLD_DIR_FMT: str = "fold_{ff:02d}"
     DATASET: str = "imbalanced"
 
-    # --- experimental design -------------------------------------------------
+    # experimental design
     METHODS: tuple = ("baseline", "sce", "elr", "asyco_divmix")
     METHOD_LABELS: dict = field(default_factory=lambda: {
         "baseline": "Baseline", "sce": "SCE", "elr": "ELR", "asyco_divmix": "AsyCo",
@@ -82,12 +58,12 @@ class Config:
     FOCUS_TAU_CONFUSION: float = 0.20
 
 
-    # --- stats (only the NTA/LNMR CI band) -----------------------------------
+    # stats (NTA/LNMR CI band only)
     N_BOOT: int = 10000
     CI: float = 0.95
     SEED: int = 10
 
-    # --- palette for the line plot -------------------------------------------
+    # palette for the line plot
     PALETTE: dict = field(default_factory=lambda: {
         "baseline": "#9ec9e2", "sce": "#2a9d8f", "elr": "#e07a3f", "asyco_divmix": "#7b5cb8",
     })
@@ -115,11 +91,8 @@ def _out(protocol: str, sub: str) -> Path:
     return d
 
 
-# ---------------------------------------------------------------------------
 # green=good colormaps
-# ---------------------------------------------------------------------------
-# Red -> yellow -> green (bad -> good). For high-is-good we map value directly;
-# for low-is-good we reverse so green sits at the low end.
+# red -> yellow -> green (bad -> good); reversed when low is good
 _RYG = LinearSegmentedColormap.from_list(
     "ryg", ["#c0392b", "#e67e22", "#f1c40f", "#7dcea0", "#1e8449"])
 _GYR = _RYG.reversed()
@@ -130,23 +103,19 @@ def good_cmap(low_is_good: bool):
     return _GYR if low_is_good else _RYG
 
 
-# Diverging map for within-method Delta-vs-clean confusion: red = mass LOST
-# under noise, green = mass GAINED, white = no change. Centered at zero.
+# diverging map for Delta-vs-clean confusion, centred at zero
 _DIVERGING = LinearSegmentedColormap.from_list(
     "delta_rwg", ["#b2182b", "#ef8a62", "#f7f7f7", "#7dcea0", "#1e8449"])
 
 
-# ---------------------------------------------------------------------------
 # loaders
-# ---------------------------------------------------------------------------
 def _raw_fold(protocol: str) -> pd.DataFrame:
     init, optim, folder = CFG.PROTOCOLS[protocol]
     fp = CFG.EXPERIMENT_ROOT / folder / CFG.RAW_FOLD_CSV
     if not fp.exists():
-        # fall back to a single combined csv that carries init/optim columns
         raise FileNotFoundError(f"raw fold csv not found: {fp}")
     df = pd.read_csv(fp)
-    # filter to this protocol if the columns exist (combined files carry them)
+    # filter to this protocol if the columns exist
     for col, val in (("init", init), ("optim", optim), ("dataset", CFG.DATASET)):
         if col in df.columns:
             df = df[df[col] == val]
@@ -165,9 +134,7 @@ def _read_run_json(protocol, method, tau, fold):
         return json.load(fh)
 
 
-# ---------------------------------------------------------------------------
 # bootstrap (only used for the NTA/LNMR band)
-# ---------------------------------------------------------------------------
 def _boot_ci(values):
     v = np.asarray(values, float)
     v = v[~np.isnan(v)]
@@ -205,9 +172,7 @@ def _save(fig, outdir, stem):
     plt.close(fig)
 
 
-# ---------------------------------------------------------------------------
 # 1. aggregate NTA / LNMR vs tau, with bootstrap CI bands
-# ---------------------------------------------------------------------------
 def fig_nta_lnmr(protocol, raw):
     _style()
     outdir = _out(protocol, "nta_lnmr")
@@ -242,13 +207,9 @@ def fig_nta_lnmr(protocol, raw):
     print(f"[fig] {outdir}/nta_lnmr_{protocol}.(pdf|png)")
 
 
-# ---------------------------------------------------------------------------
 # 2. per-class F1 heatmap (methods x classes), one per tau   (green=high)
-# ---------------------------------------------------------------------------
 def _white_cell_gaps(ax, nrows, ncols, lw=3.0):
-    """Draw white separators between imshow cells (gap-between-cells look),
-    matching the human-comparison matrices. Drawn as explicit high-zorder
-    lines so they sit cleanly ON TOP of the cells."""
+    """Draw white separators between imshow cells."""
     for x in np.arange(0.5, ncols - 1 + 1e-9, 1):
         ax.axvline(x, color="white", linewidth=lw, zorder=2)
     for y in np.arange(0.5, nrows - 1 + 1e-9, 1):
@@ -302,10 +263,8 @@ def fig_perclass_f1(protocol, raw):
     print(f"[fig] {outdir}/perclass_f1_{protocol}_tau*.png  (6 files)")
 
 
-# ---------------------------------------------------------------------------
 # 3+4. per-class LNMR / NTA by-clean heatmaps (from json), one per tau>0
 #       LNMR: low is good (green=low). NTA: high is good (green=high).
-# ---------------------------------------------------------------------------
 def _perclass_byclean_mean(protocol, method, tau, key):
     """Fold-average of a per-class array key from the run jsons."""
     rows = []
@@ -338,9 +297,7 @@ def fig_perclass_byclean(protocol, key, sub, low_is_good, label):
     print(f"[fig] {outdir}/{sub}_{protocol}_tau*.png")
 
 
-# ---------------------------------------------------------------------------
 # 5. summed confusion matrices per (method, tau): normalized + counts
-# ---------------------------------------------------------------------------
 def _summed_confusion(protocol, method, tau):
     acc = None
     for fold in range(CFG.N_FOLDS):
@@ -405,12 +362,7 @@ def _confusion_panel(M, classes, title, outdir, stem, normalize):
     _save(fig, outdir, stem)
 
 
-# ---------------------------------------------------------------------------
 # 5b. Delta-vs-own-clean confusion heatmaps (row-normalized), one per method
-#     Each method's row-normalized confusion at FOCUS_TAU minus the SAME
-#     method's row-normalized confusion at tau=0. Diverging map centred at 0:
-#     red = cell gained prediction mass under noise, blue = lost.
-# ---------------------------------------------------------------------------
 def _rownorm(cm):
     rs = cm.sum(1, keepdims=True); rs = np.where(rs == 0, 1, rs)
     return cm / rs
@@ -445,7 +397,7 @@ def fig_confusion_delta(protocol, focus_tau=None):
         for i in range(d.shape[0]):
             for j in range(d.shape[1]):
                 v = d[i, j]
-                # label every cell; near-zero shows as +0.00 / -0.00 -> normalize to 0.00
+                # label every cell; normalize near-zero to 0.00
                 if abs(v) < 0.005:
                     v = 0.0
                 tc = "white" if abs(v) > 0.6 * vmax else "0.1"
@@ -462,8 +414,7 @@ def fig_confusion_delta(protocol, focus_tau=None):
 
 
 def fig_confusion_grid(protocol, focus_tau=None):
-    """2x2 panel of row-normalized confusion matrices (all four methods) at one
-    noise rate, for a compact side-by-side comparison."""
+    """2x2 panel of row-normalized confusion matrices at one noise rate."""
     focus_tau = CFG.FOCUS_TAU_CONFUSION if focus_tau is None else focus_tau
     outdir = _out(protocol, "confusion")
     classes = _classes()
@@ -501,7 +452,6 @@ def fig_confusion_grid(protocol, focus_tau=None):
     fig.suptitle(f"Row-normalized confusion matrices - protocol {protocol}, "
                  f"$\\tau={focus_tau:.2f}$", fontsize=12.5)
     tt = int(round(focus_tau * 100))
-    # constrained_layout handles spacing; _save just writes the file
     if CFG.SAVE_PDF:
         fig.savefig(outdir / f"confusion_norm_grid_{protocol}_tau{tt:02d}.pdf", bbox_inches="tight")
     if CFG.SAVE_PNG:
@@ -511,21 +461,16 @@ def fig_confusion_grid(protocol, focus_tau=None):
 
 
 
-# ===========================================================================
-# COMBINED GRIDS: one figure per diagnostic, tau as a panel dimension.
-# These collapse the six per-tau files into a single "full sweep" figure for
-# the appendix. They reuse the same loaders and colormaps as the per-tau code.
-# ===========================================================================
+# combined grids: one figure per diagnostic, tau as a panel dimension
 
 def _grid_dims(n_panels, ncols):
     nrows = int(np.ceil(n_panels / ncols))
     return nrows, ncols
 
 
-# ---- per-class heatmap sweep (LNMR / NTA / F1): rows = tau, one panel each --
+# per-class heatmap sweep (LNMR / NTA / F1): rows = tau, one panel each
 def _collect_perclass_matrix(protocol, raw, tau, kind):
-    """Return a (methods x classes) fold-mean matrix for one tau.
-    kind in {'f1','lnmr','nta'}; 'f1' reads raw_fold csv, the others read json."""
+    """Return a (methods x classes) fold-mean matrix for one tau."""
     classes = _classes()
     alpha = list(CFG.CLASSES_ALPHA)
     order_idx = [alpha.index(c) for c in classes]
@@ -548,8 +493,7 @@ def _collect_perclass_matrix(protocol, raw, tau, kind):
 
 
 def fig_perclass_grid(protocol, raw, kind, low_is_good, label, include_clean):
-    """One tall figure: rows = tau, each panel a (methods x classes) heatmap.
-    kind in {'f1','lnmr','nta'}. F1 can include tau=0; LNMR/NTA cannot."""
+    """One tall figure: rows = tau, each panel a (methods x classes) heatmap."""
     outdir = _out(protocol, f"perclass_{kind}")
     classes = _classes()
     mlabels = [CFG.METHOD_LABELS.get(m, m) for m in CFG.METHODS]
@@ -602,10 +546,9 @@ def fig_perclass_grid(protocol, raw, kind, low_is_good, label, include_clean):
     print(f"[fig] {outdir}/grid_perclass_{kind}_{protocol}.(pdf|png)")
 
 
-# ---- confusion sweep: rows = tau, cols = method, each a 7x7 row-norm matrix --
+# confusion sweep: rows = tau, cols = method, each a 7x7 row-norm matrix
 def fig_confusion_grid_all(protocol, include_clean=False):
-    """One master figure: rows = tau, cols = method, each panel a row-normalized
-    7x7 confusion matrix. Collapses the per-tau 2x2 grids into a single sweep."""
+    """One master figure: rows = tau, cols = method, each a row-normalized 7x7 confusion matrix."""
     outdir = _out(protocol, "confusion")
     classes = _classes()
     alpha = list(CFG.CLASSES_ALPHA)
@@ -669,9 +612,7 @@ def fig_confusion_grid_all(protocol, include_clean=False):
 
 
 
-# ---------------------------------------------------------------------------
 # main
-# ---------------------------------------------------------------------------
 def main():
     for protocol in CFG.PROTOCOLS_TO_RUN:
         if protocol not in CFG.PROTOCOLS:

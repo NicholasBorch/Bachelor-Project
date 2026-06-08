@@ -1,12 +1,9 @@
-"""Stage 1b (merge step): assemble per-fold OOF probabilities into a single
-array aligned with the dataset's canonical metadata row order.
+"""
+Stage 1b merge: assemble per-fold OOF probabilities into one array aligned with
+the dataset's canonical metadata row order.
 
-Run: python -m scripts.stage1b_merge_oof_probs --dataset imbalanced
-
-Prerequisites: all 10 per-fold OOF files from stage1b_collect_oof_probs.py.
-
-Output: data/processed/HAM10000/cv_folds/{dataset}/oof_probs/oof_probs_full.npy
-        with shape (N_samples, 7), ordered to match the dataset's metadata CSV.
+Requires all per-fold OOF files from stage1b_collect_oof_probs. Writes
+oof_probs_full.npy of shape (N_samples, 7).
 """
 from __future__ import annotations
 
